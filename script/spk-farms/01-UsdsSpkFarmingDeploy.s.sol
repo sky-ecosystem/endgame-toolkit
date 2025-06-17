@@ -63,8 +63,8 @@ contract SpkFarms_UsdsSpkFarmingDeployScript is Script {
         vm.stopBroadcast();
 
         ScriptTools.exportContract(NAME, "admin", admin);
-        ScriptTools.exportContract(NAME, "spk", spk);
-        ScriptTools.exportContract(NAME, "usds", usds);
+        ScriptTools.exportContract(NAME, "rewardsToken", spk);
+        ScriptTools.exportContract(NAME, "stakingToken", usds);
         ScriptTools.exportContract(NAME, "dist", dist);
         ScriptTools.exportContract(NAME, "rewards", rewards);
         ScriptTools.exportContract(NAME, "vest", vest);

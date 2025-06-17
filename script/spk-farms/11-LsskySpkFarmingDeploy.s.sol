@@ -63,8 +63,8 @@ contract SpkFarms_LsskySpkFarmingDeployScript is Script {
         vm.stopBroadcast();
 
         ScriptTools.exportContract(NAME, "admin", admin);
-        ScriptTools.exportContract(NAME, "spk", spk);
-        ScriptTools.exportContract(NAME, "lssky", lssky);
+        ScriptTools.exportContract(NAME, "rewardsToken", spk);
+        ScriptTools.exportContract(NAME, "stakingToken", lssky);
         ScriptTools.exportContract(NAME, "dist", dist);
         ScriptTools.exportContract(NAME, "rewards", rewards);
         ScriptTools.exportContract(NAME, "vest", vest);
