@@ -30,6 +30,10 @@ contract SpkFarms_SpkFarmingCheckDeploymentScript is Script {
         address vest = deps.readAddress(".vest");
         address stakingToken = deps.readAddress(".stakingToken");
 
+        require(WardsLike(vest).wards(admin) == 1, "DssVest/pause-proxy-not-ward");
+        require(WardsLike(dist).wards(admin) == 1, "VestedRewardsDistribution/pause-proxy-not-ward");
+        require(StakingRewardsLike(rewards).owner() == admin, "StakingRewards/admin-not-owner");
+
         require(VestedRewardsDistributionLike(dist).dssVest() == vest, "VestedRewardsDistribution/invalid-vest");
         require(VestedRewardsDistributionLike(dist).gem() == spk, "VestedRewardsDistribution/invalid-gem");
         require(
@@ -37,7 +41,6 @@ contract SpkFarms_SpkFarmingCheckDeploymentScript is Script {
             "VestedRewardsDistribution/invalid-staking-rewards"
         );
 
-        require(StakingRewardsLike(rewards).owner() == admin, "StakingRewards/admin-not-owner");
         require(StakingRewardsLike(rewards).rewardsToken() == spk, "StakingRewards/invalid-rewards-token");
         require(StakingRewardsLike(rewards).stakingToken() == stakingToken, "StakingRewards/invalid-staking-token");
         require(
