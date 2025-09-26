@@ -25,16 +25,16 @@ import {
     VestedRewardsDistributionDeployParams
 } from "../dependencies/VestedRewardsDistributionDeploy.sol";
 
-contract SpkFarm_LsskySpkFarmingDeployScript is Script {
+contract SpkFarms_UsdsSpkFarmingDeployScript is Script {
     ChainlogLike internal constant chainlog = ChainlogLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
-    string internal constant NAME = "spk-farm/lssky-spk-farming-deploy";
+    string internal constant NAME = "spk-farms/usds-spk-farming-deploy";
 
     function run() external {
         Reader reader = new Reader(ScriptTools.loadConfig());
 
         address admin = chainlog.getAddress("MCD_PAUSE_PROXY");
-        address lssky = chainlog.getAddress("LOCKSTAKE_SKY");
+        address usds = chainlog.getAddress("USDS");
 
         address spk = reader.envOrReadAddress("FOUNDRY_SPK", ".spk");
         address vest = reader.envOrReadAddress("FOUNDRY_VEST", ".vest");
@@ -45,7 +45,7 @@ contract SpkFarm_LsskySpkFarmingDeployScript is Script {
 
         if (rewards == address(0)) {
             rewards = StakingRewardsDeploy.deploy(
-                StakingRewardsDeployParams({owner: admin, stakingToken: lssky, rewardsToken: spk})
+                StakingRewardsDeployParams({owner: admin, stakingToken: usds, rewardsToken: spk})
             );
         }
 
@@ -64,7 +64,7 @@ contract SpkFarm_LsskySpkFarmingDeployScript is Script {
 
         ScriptTools.exportContract(NAME, "admin", admin);
         ScriptTools.exportContract(NAME, "rewardsToken", spk);
-        ScriptTools.exportContract(NAME, "stakingToken", lssky);
+        ScriptTools.exportContract(NAME, "stakingToken", usds);
         ScriptTools.exportContract(NAME, "dist", dist);
         ScriptTools.exportContract(NAME, "rewards", rewards);
         ScriptTools.exportContract(NAME, "vest", vest);

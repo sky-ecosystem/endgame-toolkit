@@ -19,7 +19,7 @@ import {Script} from "forge-std/Script.sol";
 import {ScriptTools} from "dss-test/ScriptTools.sol";
 import {Reader} from "../helpers/Reader.sol";
 
-contract SpkFarm_SpkFarmingCheckDeploymentScript is Script {
+contract SpkFarms_SpkFarmingCheckDeploymentScript is Script {
     function run() external returns (bool) {
         Reader deps = new Reader(ScriptTools.loadDependencies());
 
