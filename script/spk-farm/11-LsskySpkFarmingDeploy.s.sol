@@ -28,7 +28,7 @@ import {
 contract SpkFarms_LsskySpkFarmingDeployScript is Script {
     ChainlogLike internal constant chainlog = ChainlogLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
-    string internal constant NAME = "spk-farms/lssky-spk-farming-deploy";
+    string internal constant NAME = "spk-farm/lssky-spk-farming-deploy";
 
     function run() external {
         Reader reader = new Reader(ScriptTools.loadConfig());
