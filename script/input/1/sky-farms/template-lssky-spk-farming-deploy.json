@@ -1,0 +1,4 @@
+{
+  "rewards": "[OPTIONAL] address: the address of the StakingRewards contract",
+  "dist": "[OPTIONAL] address: the address of the VestedRewardsDistrubution contract"
+}
