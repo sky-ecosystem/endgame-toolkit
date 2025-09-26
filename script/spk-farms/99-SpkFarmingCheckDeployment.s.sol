@@ -61,8 +61,6 @@ interface WardsLike {
 interface VestedRewardsDistributionLike {
     function dssVest() external view returns (address);
 
-    function vestId() external view returns (uint256);
-
     function stakingRewards() external view returns (address);
 
     function gem() external view returns (address);
@@ -79,19 +77,5 @@ interface StakingRewardsLike {
 }
 
 interface DssVestWithGemLike {
-    function bgn(uint256 _id) external view returns (uint256);
-
-    function fin(uint256 _id) external view returns (uint256);
-
     function gem() external view returns (address);
-
-    function mgr(uint256 _id) external view returns (address);
-
-    function res(uint256 _id) external view returns (uint256);
-
-    function tot(uint256 _id) external view returns (uint256);
-
-    function usr(uint256 _id) external view returns (address);
-
-    function valid(uint256 _id) external view returns (bool);
 }
