@@ -35,7 +35,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     address vest;
     address lockstakeEngine;
     address distJob;
-    LockstakeFarmingInitParams p;
+    LockstakeFarmingInitParams lfp;
 
     function setUp() public {
         vm.createSelectFork("mainnet");
@@ -61,7 +61,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             })
         );
 
-        p = LockstakeFarmingInitParams({
+        lfp = LockstakeFarmingInitParams({
             admin: pauseProxy,
             stakingToken: lssky,
             rewardsToken: sky,
@@ -110,16 +110,16 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
         // Simulate spell casting
         vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.cast, (p)));
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.cast, (lfp)));
 
-        assertEq(StakingRewardsLike(rewards).rewardRate(), p.vestTot / p.vestTau, "after: should set reward rate");
+        assertEq(StakingRewardsLike(rewards).rewardRate(), lfp.vestTot / lfp.vestTau, "after: should set reward rate");
         assertEq(
             StakingRewardsLike(rewards).rewardsDistribution(), address(dist), "after: should set rewards distribution"
         );
 
         assertEq(VestedRewardsDistributionLike(dist).vestId(), pvestCount + 1, "after: should set the correct vestId");
         // Should distribute only if vesting period has already started
-        if (p.vestBgn < block.timestamp) {
+        if (lfp.vestBgn < block.timestamp) {
             assertEq(
                 VestedRewardsDistributionLike(dist).lastDistributedAt(),
                 block.timestamp,
@@ -134,13 +134,13 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
         assertEq(DssVestWithGemLike(vest).unpaid(pvestCount + 1), 0, "after: should have distributed any unpaid amount");
         // Note: if there was a distribution, the allowance would've been decreased by the paid amount
-        uint256 expectedAllowance = pallowance + p.vestTot - DssVestWithGemLike(vest).rxd(pvestCount + 1);
+        uint256 expectedAllowance = pallowance + lfp.vestTot - DssVestWithGemLike(vest).rxd(pvestCount + 1);
         assertEq(
             ERC20Like(sky).allowance(pauseProxy, vest), expectedAllowance, "after: should set the correct allowance"
         );
 
         // Adds 10% buffer
-        uint256 expectedRateWithBuffer = (11 * p.vestTot) / p.vestTau / 10;
+        uint256 expectedRateWithBuffer = (11 * lfp.vestTot) / lfp.vestTau / 10;
         if (expectedRateWithBuffer > pcap) {
             assertEq(DssVestWithGemLike(vest).cap(), expectedRateWithBuffer, "after: should set the correct cap");
         }
@@ -154,8 +154,8 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 }
 
 contract MockSpell {
-    function cast(LockstakeFarmingInitParams memory p) public {
-        TreasuryFundedFarmingInit.initLockstakeFarm(p);
+    function cast(LockstakeFarmingInitParams memory lfp) public {
+        TreasuryFundedFarmingInit.initLockstakeFarm(lfp);
     }
 }
 
