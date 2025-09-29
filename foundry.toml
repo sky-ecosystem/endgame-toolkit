@@ -38,5 +38,8 @@ fs_permissions = [
     { access = "read-write", path = "./script/output/" }
 ]
 
+[rpc_endpoints]
+mainnet = "${ETH_RPC_URL}"
+
 [etherscan]
 unknown_chain = { key = "${TENDERLY_ACCESS_KEY}", chain = 314311, url = "${ETH_RPC_URL}/verify/etherscan" }

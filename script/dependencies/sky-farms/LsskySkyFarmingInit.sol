@@ -16,7 +16,9 @@
 pragma solidity ^0.8.16;
 
 import {StakingRewardsInit, StakingRewardsInitParams} from "../StakingRewardsInit.sol";
-import {VestedRewardsDistributionInit, VestedRewardsDistributionInitParams} from "../VestedRewardsDistributionInit.sol";
+import {
+    VestedRewardsDistributionInit, VestedRewardsDistributionInitParams
+} from "../VestedRewardsDistributionInit.sol";
 import {VestInit, VestCreateParams} from "../VestInit.sol";
 
 struct LsskySkyFarmingInitParams {
@@ -47,8 +49,7 @@ library LsskySkyFarmingInit {
             "LsskySkyFarmingInit/rewards-staking-token-mismatch"
         );
         require(
-            StakingRewardsLike(p.rewards).rewardsToken() == p.sky,
-            "LsskySkyFarmingInit/rewards-rewards-token-mismatch"
+            StakingRewardsLike(p.rewards).rewardsToken() == p.sky, "LsskySkyFarmingInit/rewards-rewards-token-mismatch"
         );
         require(StakingRewardsLike(p.rewards).rewardRate() == 0, "LsskySkyFarmingInit/reward-rate-not-zero");
         require(
@@ -58,10 +59,8 @@ library LsskySkyFarmingInit {
         require(StakingRewardsLike(p.rewards).owner() == address(this), "LsskySkyFarmingInit/invalid-owner");
 
         require(VestedRewardsDistributionLike(p.dist).gem() == p.sky, "LsskySkyFarmingInit/dist-gem-mismatch");
-        require(
-            VestedRewardsDistributionLike(p.dist).dssVest() == p.vest,
-            "LsskySkyFarmingInit/dist-dss-vest-mismatch"
-        );
+        require(VestedRewardsDistributionLike(p.dist).dssVest() == p.vest, "LsskySkyFarmingInit/dist-dss-vest-mismatch");
+        require(VestedRewardsDistributionLike(p.dist).vestId() == 0, "LsskySkyFarmingInit/dist-vest-id-already-set");
         require(
             VestedRewardsDistributionLike(p.dist).stakingRewards() == p.rewards,
             "LsskySkyFarmingInit/dist-staking-rewards-mismatch"
@@ -85,8 +84,7 @@ library LsskySkyFarmingInit {
 
         // Create the proper vesting stream for rewards distribution.
         uint256 vestId = VestInit.create(
-            p.vest,
-            VestCreateParams({usr: p.dist, tot: p.vestTot, bgn: p.vestBgn, tau: p.vestTau, eta: 0})
+            p.vest, VestCreateParams({usr: p.dist, tot: p.vestTot, bgn: p.vestBgn, tau: p.vestTau, eta: 0})
         );
 
         // Set the `vestId` in `dist`
@@ -111,44 +109,33 @@ interface WardsLike {
 
 interface DssVestWithGemLike {
     function cap() external view returns (uint256);
-
     function gem() external view returns (address);
-
     function file(bytes32 key, uint256 value) external;
-
     function unpaid(uint256 vestid) external view returns (uint256);
 }
 
 interface StakingRewardsLike {
     function owner() external view returns (address);
-
     function rewardRate() external view returns (uint256);
-
     function rewardsDistribution() external view returns (address);
-
     function rewardsToken() external view returns (address);
-
     function stakingToken() external view returns (address);
 }
 
 interface VestedRewardsDistributionLike {
     function dssVest() external view returns (address);
-
     function distribute() external;
-
     function gem() external view returns (address);
-
     function stakingRewards() external view returns (address);
+    function vestId() external view returns (uint256);
 }
 
 interface ChainlogLike {
     function getAddress(bytes32 key) external view returns (address);
-
     function setAddress(bytes32 key, address addr) external;
 }
 
 interface ERC20Like {
     function allowance(address owner, address spender) external view returns (uint256);
-
     function approve(address spender, uint256 amount) external;
 }
