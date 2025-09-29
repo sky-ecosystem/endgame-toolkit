@@ -21,9 +21,9 @@ import {
     VestedRewardsDistributionDeploy,
     VestedRewardsDistributionDeployParams
 } from "../VestedRewardsDistributionDeploy.sol";
-import {LsskySkyFarmingInit, LsskySkyFarmingInitParams} from "./LsskySkyFarmingInit.sol";
+import {TreasuryFundedFarmingInit, LockstakeFarmingInitParams} from "./TreasuryFundedFarmingInit.sol";
 
-contract LsskySkyFarmingInitTest is DssTest {
+contract TreasuryFundedFarmingInitTest is DssTest {
     ChainlogLike chainlog;
     MockSpell spell;
     address pause;
@@ -33,7 +33,9 @@ contract LsskySkyFarmingInitTest is DssTest {
     address rewards;
     address dist;
     address vest;
-    LsskySkyFarmingInitParams p;
+    address lockstakeEngine;
+    address distJob;
+    LockstakeFarmingInitParams p;
 
     function setUp() public {
         vm.createSelectFork("mainnet");
@@ -41,9 +43,11 @@ contract LsskySkyFarmingInitTest is DssTest {
 
         pause = chainlog.getAddress("MCD_PAUSE");
         pauseProxy = chainlog.getAddress("MCD_PAUSE_PROXY");
+        lockstakeEngine = chainlog.getAddress("LOCKSTAKE_ENGINE");
         lssky = chainlog.getAddress("LOCKSTAKE_SKY");
         sky = chainlog.getAddress("SKY");
         vest = chainlog.getAddress("MCD_VEST_SKY_TREASURY");
+        distJob = chainlog.getAddress("CRON_REWARDS_DIST_JOB");
 
         rewards = StakingRewardsDeploy.deploy(
             StakingRewardsDeployParams({owner: pauseProxy, stakingToken: lssky, rewardsToken: sky})
@@ -57,22 +61,26 @@ contract LsskySkyFarmingInitTest is DssTest {
             })
         );
 
-        p = LsskySkyFarmingInitParams({
-            lssky: lssky,
-            sky: sky,
+        p = LockstakeFarmingInitParams({
+            admin: pauseProxy,
+            stakingToken: lssky,
+            rewardsToken: sky,
             rewards: rewards,
             rewardsKey: "REWARDS_LSSKY_SKY",
             dist: dist,
             distKey: "REWARDS_DIST_LSSKY_SKY",
+            distJob: distJob,
+            distJobInterval: 7 days - 1 hours,
             vest: vest,
             vestTot: 2_400_000,
             vestBgn: block.timestamp - 7 days,
-            vestTau: 365 days
+            vestTau: 365 days,
+            lockstakeEngine: lockstakeEngine
         });
         spell = new MockSpell();
     }
 
-    function testInit() public {
+    function testInitLockstakeFarmActions() public {
         // Sanity checks
         assertEq(DssVestWithGemLike(vest).gem(), sky, "before: gem mismatch");
 
@@ -86,6 +94,14 @@ contract LsskySkyFarmingInitTest is DssTest {
         assertEq(VestedRewardsDistributionLike(dist).dssVest(), vest, "before: vest mismatch");
         assertEq(VestedRewardsDistributionLike(dist).vestId(), 0, "before: vest id already set");
         assertEq(VestedRewardsDistributionLike(dist).stakingRewards(), rewards, "before: staking rewards mismatch");
+
+        assertFalse(VestedRewardsDistributionJobLike(distJob).has(dist), "before: job should not have dist");
+
+        assertEq(
+            uint8(LockstakeEngineLike(lockstakeEngine).farms(rewards)),
+            uint8(LockstakeEngineLike.FarmStatus.UNSUPPORTED),
+            "before: lockstake engine should not have rewards"
+        );
 
         // Initial state
         uint256 pallowance = ERC20Like(sky).allowance(pauseProxy, vest);
@@ -111,6 +127,8 @@ contract LsskySkyFarmingInitTest is DssTest {
             );
         }
 
+        assertTrue(VestedRewardsDistributionJobLike(distJob).has(dist), "after: job should have dist");
+
         assertEq(
             DssVestWithGemLike(vest).ids(), pvestCount + 1, "after: should have created exactly 1 new vesting stream"
         );
@@ -126,12 +144,18 @@ contract LsskySkyFarmingInitTest is DssTest {
         if (expectedRateWithBuffer > pcap) {
             assertEq(DssVestWithGemLike(vest).cap(), expectedRateWithBuffer, "after: should set the correct cap");
         }
+
+        assertEq(
+            uint8(LockstakeEngineLike(lockstakeEngine).farms(rewards)),
+            uint8(LockstakeEngineLike.FarmStatus.ACTIVE),
+            "before: lockstake engine should not have rewards"
+        );
     }
 }
 
 contract MockSpell {
-    function cast(LsskySkyFarmingInitParams memory p) public {
-        LsskySkyFarmingInit.init(p);
+    function cast(LockstakeFarmingInitParams memory p) public {
+        TreasuryFundedFarmingInit.initLockstakeFarm(p);
     }
 }
 
@@ -181,6 +205,20 @@ interface VestedRewardsDistributionLike {
     function vestId() external view returns (uint256);
 }
 
+interface VestedRewardsDistributionJobLike {
+    function has(address dist) external view returns (bool);
+}
+
 interface ERC20Like {
     function allowance(address owner, address spender) external view returns (uint256);
+}
+
+interface LockstakeEngineLike {
+    enum FarmStatus {
+        UNSUPPORTED,
+        ACTIVE,
+        DELETED
+    }
+
+    function farms(address farm) external view returns (FarmStatus);
 }

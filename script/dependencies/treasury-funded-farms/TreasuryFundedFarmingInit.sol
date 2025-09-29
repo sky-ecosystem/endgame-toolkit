@@ -21,58 +21,71 @@ import {
 } from "../VestedRewardsDistributionInit.sol";
 import {VestInit, VestCreateParams} from "../VestInit.sol";
 
-struct LsskySkyFarmingInitParams {
-    address lssky;
-    address sky;
+struct LockstakeFarmingInitParams {
+    address admin;
+    address stakingToken;
+    address rewardsToken;
     address rewards;
     bytes32 rewardsKey; // Chainlog key
     address dist;
     bytes32 distKey; // Chainlog key
+    address distJob;
+    uint256 distJobInterval; // in seconds
     address vest;
     uint256 vestTot;
     uint256 vestBgn;
     uint256 vestTau;
+    address lockstakeEngine;
 }
 
-struct LsskySkyFarmingInitResult {
+struct FarmingInitResult {
     uint256 vestId;
+    uint256 initialDistribution;
 }
 
-library LsskySkyFarmingInit {
+library TreasuryFundedFarmingInit {
     ChainlogLike internal constant chainlog = ChainlogLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
-    function init(LsskySkyFarmingInitParams memory p) internal returns (LsskySkyFarmingInitResult memory r) {
-        require(DssVestWithGemLike(p.vest).gem() == p.sky, "LsskySkyFarmingInit/vest-gem-mismatch");
+    function initLockstakeFarm(LockstakeFarmingInitParams memory p) internal returns (FarmingInitResult memory r) {
+        require(DssVestWithGemLike(p.vest).gem() == p.rewardsToken, "TreasuryFundedFarmingInit/vest-gem-mismatch");
 
         require(
-            StakingRewardsLike(p.rewards).stakingToken() == p.lssky,
-            "LsskySkyFarmingInit/rewards-staking-token-mismatch"
+            StakingRewardsLike(p.rewards).stakingToken() == p.stakingToken,
+            "TreasuryFundedFarmingInit/rewards-staking-token-mismatch"
         );
         require(
-            StakingRewardsLike(p.rewards).rewardsToken() == p.sky, "LsskySkyFarmingInit/rewards-rewards-token-mismatch"
+            StakingRewardsLike(p.rewards).rewardsToken() == p.rewardsToken,
+            "TreasuryFundedFarmingInit/rewards-rewards-token-mismatch"
         );
-        require(StakingRewardsLike(p.rewards).rewardRate() == 0, "LsskySkyFarmingInit/reward-rate-not-zero");
+        require(StakingRewardsLike(p.rewards).rewardRate() == 0, "TreasuryFundedFarmingInit/reward-rate-not-zero");
         require(
             StakingRewardsLike(p.rewards).rewardsDistribution() == address(0),
-            "LsskySkyFarmingInit/rewards-distribution-already-set"
+            "TreasuryFundedFarmingInit/rewards-distribution-already-set"
         );
-        require(StakingRewardsLike(p.rewards).owner() == address(this), "LsskySkyFarmingInit/invalid-owner");
+        require(StakingRewardsLike(p.rewards).owner() == p.admin, "TreasuryFundedFarmingInit/invalid-owner");
 
-        require(VestedRewardsDistributionLike(p.dist).gem() == p.sky, "LsskySkyFarmingInit/dist-gem-mismatch");
-        require(VestedRewardsDistributionLike(p.dist).dssVest() == p.vest, "LsskySkyFarmingInit/dist-dss-vest-mismatch");
-        require(VestedRewardsDistributionLike(p.dist).vestId() == 0, "LsskySkyFarmingInit/dist-vest-id-already-set");
+        require(
+            VestedRewardsDistributionLike(p.dist).gem() == p.rewardsToken, "TreasuryFundedFarmingInit/dist-gem-mismatch"
+        );
+        require(
+            VestedRewardsDistributionLike(p.dist).dssVest() == p.vest,
+            "TreasuryFundedFarmingInit/dist-dss-vest-mismatch"
+        );
+        require(
+            VestedRewardsDistributionLike(p.dist).vestId() == 0, "TreasuryFundedFarmingInit/dist-vest-id-already-set"
+        );
         require(
             VestedRewardsDistributionLike(p.dist).stakingRewards() == p.rewards,
-            "LsskySkyFarmingInit/dist-staking-rewards-mismatch"
+            "TreasuryFundedFarmingInit/dist-staking-rewards-mismatch"
         );
 
         // Set `dist` with  `rewardsDistribution` role in `rewards`.
         StakingRewardsInit.init(p.rewards, StakingRewardsInitParams({dist: p.dist}));
 
-        // Increase SKY `p.vest` allowance from the treasury for `p.vestTot`.
+        // Increase `rewardsToken` `p.vest` allowance from the treasury for `p.vestTot`.
         // Note: `p.vest` is expected to be of type `DssVestTransferrable`
-        uint256 allowance = ERC20Like(p.sky).allowance(address(this), p.vest);
-        ERC20Like(p.sky).approve(p.vest, allowance + p.vestTot);
+        uint256 allowance = ERC20Like(p.rewardsToken).allowance(p.admin, p.vest);
+        ERC20Like(p.rewardsToken).approve(p.vest, allowance + p.vestTot);
 
         // Check if `p.vest.cap` needs to be adjusted based on the new vest rate.
         // Note: adds 10% buffer to the rate, as usual for this parameter.
@@ -96,7 +109,12 @@ library LsskySkyFarmingInit {
             VestedRewardsDistributionLike(p.dist).distribute();
         }
 
+        VestedRewardsDistributionJobLike(p.distJob).set(p.dist, p.distJobInterval);
+
+        LockstakeEngineLike(p.lockstakeEngine).addFarm(p.rewards);
+
         r.vestId = vestId;
+        r.initialDistribution = unpaid;
 
         chainlog.setAddress(p.rewardsKey, p.rewards);
         chainlog.setAddress(p.distKey, p.dist);
@@ -138,4 +156,12 @@ interface ChainlogLike {
 interface ERC20Like {
     function allowance(address owner, address spender) external view returns (uint256);
     function approve(address spender, uint256 amount) external;
+}
+
+interface VestedRewardsDistributionJobLike {
+    function set(address dist, uint256 interval) external;
+}
+
+interface LockstakeEngineLike {
+    function addFarm(address farm) external;
 }

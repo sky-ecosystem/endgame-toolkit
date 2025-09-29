@@ -12,6 +12,7 @@ fs_permissions = [
     { access = "read", path = "./script/input/" },
     { access = "read-write", path = "./script/output/" }
 ]
+evm_version = "cancun"
 
 [invariant]
 fail_on_revert = true
