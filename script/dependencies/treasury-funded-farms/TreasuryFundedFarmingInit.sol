@@ -21,7 +21,7 @@ import {
 } from "../VestedRewardsDistributionInit.sol";
 import {VestInit, VestCreateParams} from "../VestInit.sol";
 
-struct LockstakeFarmingInitParams {
+struct FarmingInitParams {
     address admin;
     address stakingToken;
     address rewardsToken;
@@ -35,7 +35,6 @@ struct LockstakeFarmingInitParams {
     uint256 vestTot;
     uint256 vestBgn;
     uint256 vestTau;
-    address lockstakeEngine;
 }
 
 struct FarmingInitResult {
@@ -46,7 +45,7 @@ struct FarmingInitResult {
 library TreasuryFundedFarmingInit {
     ChainlogLike internal constant chainlog = ChainlogLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
-    function initLockstakeFarm(LockstakeFarmingInitParams memory p) internal returns (FarmingInitResult memory r) {
+    function initFarm(FarmingInitParams memory p) internal returns (FarmingInitResult memory r) {
         require(DssVestWithGemLike(p.vest).gem() == p.rewardsToken, "TreasuryFundedFarmingInit/vest-gem-mismatch");
 
         require(
@@ -111,13 +110,19 @@ library TreasuryFundedFarmingInit {
 
         VestedRewardsDistributionJobLike(p.distJob).set(p.dist, p.distJobInterval);
 
-        LockstakeEngineLike(p.lockstakeEngine).addFarm(p.rewards);
-
         r.vestId = vestId;
         r.initialDistribution = unpaid;
 
         chainlog.setAddress(p.rewardsKey, p.rewards);
         chainlog.setAddress(p.distKey, p.dist);
+    }
+
+    function initLockstakeFarm(FarmingInitParams memory p, address lockstakeEngine)
+        internal
+        returns (FarmingInitResult memory r)
+    {
+        r = initFarm(p);
+        LockstakeEngineLike(lockstakeEngine).addFarm(p.rewards);
     }
 }
 
@@ -127,34 +132,47 @@ interface WardsLike {
 
 interface DssVestWithGemLike {
     function cap() external view returns (uint256);
+
     function gem() external view returns (address);
+
     function file(bytes32 key, uint256 value) external;
+
     function unpaid(uint256 vestid) external view returns (uint256);
 }
 
 interface StakingRewardsLike {
     function owner() external view returns (address);
+
     function rewardRate() external view returns (uint256);
+
     function rewardsDistribution() external view returns (address);
+
     function rewardsToken() external view returns (address);
+
     function stakingToken() external view returns (address);
 }
 
 interface VestedRewardsDistributionLike {
     function dssVest() external view returns (address);
+
     function distribute() external;
+
     function gem() external view returns (address);
+
     function stakingRewards() external view returns (address);
+
     function vestId() external view returns (uint256);
 }
 
 interface ChainlogLike {
     function getAddress(bytes32 key) external view returns (address);
+
     function setAddress(bytes32 key, address addr) external;
 }
 
 interface ERC20Like {
     function allowance(address owner, address spender) external view returns (uint256);
+
     function approve(address spender, uint256 amount) external;
 }
 

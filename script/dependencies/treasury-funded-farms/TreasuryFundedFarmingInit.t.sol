@@ -21,7 +21,7 @@ import {
     VestedRewardsDistributionDeploy,
     VestedRewardsDistributionDeployParams
 } from "../VestedRewardsDistributionDeploy.sol";
-import {TreasuryFundedFarmingInit, LockstakeFarmingInitParams} from "./TreasuryFundedFarmingInit.sol";
+import {TreasuryFundedFarmingInit, FarmingInitParams} from "./TreasuryFundedFarmingInit.sol";
 
 contract TreasuryFundedFarmingInitTest is DssTest {
     ChainlogLike chainlog;
@@ -30,12 +30,14 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     address pauseProxy;
     address lssky;
     address sky;
+    address usds;
     address rewards;
     address dist;
     address vest;
     address lockstakeEngine;
     address distJob;
-    LockstakeFarmingInitParams lfp;
+    FarmingInitParams lfp;
+    FarmingInitParams fp;
 
     function setUp() public {
         vm.createSelectFork("mainnet");
@@ -46,6 +48,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         lockstakeEngine = chainlog.getAddress("LOCKSTAKE_ENGINE");
         lssky = chainlog.getAddress("LOCKSTAKE_SKY");
         sky = chainlog.getAddress("SKY");
+        usds = chainlog.getAddress("USDS");
         vest = chainlog.getAddress("MCD_VEST_SKY_TREASURY");
         distJob = chainlog.getAddress("CRON_REWARDS_DIST_JOB");
 
@@ -61,7 +64,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             })
         );
 
-        lfp = LockstakeFarmingInitParams({
+        lfp = FarmingInitParams({
             admin: pauseProxy,
             stakingToken: lssky,
             rewardsToken: sky,
@@ -74,88 +77,137 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vest: vest,
             vestTot: 2_400_000,
             vestBgn: block.timestamp - 7 days,
-            vestTau: 365 days,
-            lockstakeEngine: lockstakeEngine
+            vestTau: 365 days
         });
+
+        fp = FarmingInitParams({
+            admin: pauseProxy,
+            stakingToken: usds,
+            rewardsToken: sky,
+            rewards: rewards,
+            rewardsKey: "REWARDS_LSSKY_SKY",
+            dist: dist,
+            distKey: "REWARDS_DIST_LSSKY_SKY",
+            distJob: distJob,
+            distJobInterval: 7 days - 1 hours,
+            vest: vest,
+            vestTot: 2_400_000,
+            vestBgn: block.timestamp - 7 days,
+            vestTau: 365 days
+        });
+
         spell = new MockSpell();
     }
 
-    function testInitLockstakeFarmActions() public {
-        // Sanity checks
-        assertEq(DssVestWithGemLike(vest).gem(), sky, "before: gem mismatch");
+    struct CheckInitFarmBeforeValues {
+        uint256 allowance;
+        uint256 cap;
+        uint256 vestCount;
+    }
 
-        assertEq(StakingRewardsLike(rewards).stakingToken(), lssky, "before: staking token mismatch");
-        assertEq(StakingRewardsLike(rewards).rewardsToken(), sky, "before: rewards token mismatch");
-        assertEq(StakingRewardsLike(rewards).rewardRate(), 0, "before: reward rate mismatch");
-        assertEq(StakingRewardsLike(rewards).owner(), pauseProxy, "before: rewards owner mismatch");
-        assertEq(StakingRewardsLike(rewards).rewardsDistribution(), address(0), "before: rewards distribution mismatch");
+    function testInitFarm() public {
+        CheckInitFarmBeforeValues memory v = _checkInitFarmActions_before(lfp);
 
-        assertEq(VestedRewardsDistributionLike(dist).gem(), sky, "before: gem mismatch");
-        assertEq(VestedRewardsDistributionLike(dist).dssVest(), vest, "before: vest mismatch");
-        assertEq(VestedRewardsDistributionLike(dist).vestId(), 0, "before: vest id already set");
-        assertEq(VestedRewardsDistributionLike(dist).stakingRewards(), rewards, "before: staking rewards mismatch");
+        // Simulate spell casting
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.cast, (lfp, lockstakeEngine)));
 
-        assertFalse(VestedRewardsDistributionJobLike(distJob).has(dist), "before: job should not have dist");
+        _checkInitFarmActions_after(lfp, v);
+    }
+
+    function testInitLockstakeFarm() public {
+        CheckInitFarmBeforeValues memory v = _checkInitFarmActions_before(lfp);
 
         assertEq(
-            uint8(LockstakeEngineLike(lockstakeEngine).farms(rewards)),
+            uint8(LockstakeEngineLike(lockstakeEngine).farms(lfp.rewards)),
             uint8(LockstakeEngineLike.FarmStatus.UNSUPPORTED),
             "before: lockstake engine should not have rewards"
         );
 
-        // Initial state
-        uint256 pallowance = ERC20Like(sky).allowance(pauseProxy, vest);
-        uint256 pcap = DssVestWithGemLike(vest).cap();
-        uint256 pvestCount = DssVestWithGemLike(vest).ids();
-
         // Simulate spell casting
         vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.cast, (lfp)));
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.cast, (lfp, lockstakeEngine)));
 
-        assertEq(StakingRewardsLike(rewards).rewardRate(), lfp.vestTot / lfp.vestTau, "after: should set reward rate");
+        _checkInitFarmActions_after(lfp, v);
+
         assertEq(
-            StakingRewardsLike(rewards).rewardsDistribution(), address(dist), "after: should set rewards distribution"
+            uint8(LockstakeEngineLike(lockstakeEngine).farms(lfp.rewards)),
+            uint8(LockstakeEngineLike.FarmStatus.ACTIVE),
+            "after: lockstake engine should have rewards"
+        );
+    }
+
+    function _checkInitFarmActions_before(FarmingInitParams memory p)
+        internal
+        returns (CheckInitFarmBeforeValues memory v)
+    {
+        // Sanity checks
+        assertEq(DssVestWithGemLike(vest).gem(), sky, "before: gem mismatch");
+
+        assertEq(StakingRewardsLike(rewards).stakingToken(), p.stakingToken, "before: staking token mismatch");
+        assertEq(StakingRewardsLike(rewards).rewardsToken(), p.rewardsToken, "before: rewards token mismatch");
+        assertEq(StakingRewardsLike(rewards).rewardRate(), 0, "before: reward rate mismatch");
+        assertEq(StakingRewardsLike(rewards).owner(), p.admin, "before: rewards owner mismatch");
+        assertEq(StakingRewardsLike(rewards).rewardsDistribution(), address(0), "before: rewards distribution mismatch");
+
+        assertEq(VestedRewardsDistributionLike(dist).gem(), p.rewardsToken, "before: gem mismatch");
+        assertEq(VestedRewardsDistributionLike(dist).dssVest(), p.vest, "before: vest mismatch");
+        assertEq(VestedRewardsDistributionLike(dist).vestId(), 0, "before: vest id already set");
+        assertEq(VestedRewardsDistributionLike(dist).stakingRewards(), p.rewards, "before: staking rewards mismatch");
+
+        assertFalse(VestedRewardsDistributionJobLike(p.distJob).has(dist), "before: job should not have dist");
+
+        // Initial state
+        v.allowance = ERC20Like(p.rewardsToken).allowance(p.admin, p.vest);
+        v.cap = DssVestWithGemLike(p.vest).cap();
+        v.vestCount = DssVestWithGemLike(p.vest).ids();
+    }
+
+    function _checkInitFarmActions_after(FarmingInitParams memory p, CheckInitFarmBeforeValues memory v) internal {
+        assertEq(StakingRewardsLike(p.rewards).rewardRate(), p.vestTot / p.vestTau, "after: should set reward rate");
+        assertEq(
+            StakingRewardsLike(p.rewards).rewardsDistribution(),
+            address(p.dist),
+            "after: should set rewards distribution"
         );
 
-        assertEq(VestedRewardsDistributionLike(dist).vestId(), pvestCount + 1, "after: should set the correct vestId");
+        assertEq(
+            VestedRewardsDistributionLike(p.dist).vestId(), v.vestCount + 1, "after: should set the correct vestId"
+        );
         // Should distribute only if vesting period has already started
-        if (lfp.vestBgn < block.timestamp) {
+        if (p.vestBgn < block.timestamp) {
             assertEq(
-                VestedRewardsDistributionLike(dist).lastDistributedAt(),
+                VestedRewardsDistributionLike(p.dist).lastDistributedAt(),
                 block.timestamp,
                 "after: should set the correct vestId"
             );
         }
 
-        assertTrue(VestedRewardsDistributionJobLike(distJob).has(dist), "after: job should have dist");
+        assertTrue(VestedRewardsDistributionJobLike(p.distJob).has(p.dist), "after: job should have dist");
 
         assertEq(
-            DssVestWithGemLike(vest).ids(), pvestCount + 1, "after: should have created exactly 1 new vesting stream"
+            DssVestWithGemLike(p.vest).ids(), v.vestCount + 1, "after: should have created exactly 1 new vesting stream"
         );
-        assertEq(DssVestWithGemLike(vest).unpaid(pvestCount + 1), 0, "after: should have distributed any unpaid amount");
-        // Note: if there was a distribution, the allowance would've been decreased by the paid amount
-        uint256 expectedAllowance = pallowance + lfp.vestTot - DssVestWithGemLike(vest).rxd(pvestCount + 1);
         assertEq(
-            ERC20Like(sky).allowance(pauseProxy, vest), expectedAllowance, "after: should set the correct allowance"
+            DssVestWithGemLike(p.vest).unpaid(v.vestCount + 1), 0, "after: should have distributed any unpaid amount"
+        );
+        // Note: if there was a distribution, the allowance would've been decreased by the paid amount
+        uint256 expectedAllowance = v.allowance + p.vestTot - DssVestWithGemLike(vest).rxd(v.vestCount + 1);
+        assertEq(
+            ERC20Like(sky).allowance(p.admin, p.vest), expectedAllowance, "after: should set the correct allowance"
         );
 
         // Adds 10% buffer
-        uint256 expectedRateWithBuffer = (11 * lfp.vestTot) / lfp.vestTau / 10;
-        if (expectedRateWithBuffer > pcap) {
-            assertEq(DssVestWithGemLike(vest).cap(), expectedRateWithBuffer, "after: should set the correct cap");
+        uint256 expectedRateWithBuffer = (11 * p.vestTot) / p.vestTau / 10;
+        if (expectedRateWithBuffer > v.cap) {
+            assertEq(DssVestWithGemLike(p.vest).cap(), expectedRateWithBuffer, "after: should set the correct cap");
         }
-
-        assertEq(
-            uint8(LockstakeEngineLike(lockstakeEngine).farms(rewards)),
-            uint8(LockstakeEngineLike.FarmStatus.ACTIVE),
-            "before: lockstake engine should not have rewards"
-        );
     }
 }
 
 contract MockSpell {
-    function cast(LockstakeFarmingInitParams memory lfp) public {
-        TreasuryFundedFarmingInit.initLockstakeFarm(lfp);
+    function cast(FarmingInitParams memory lfp, address lockstakeEngine) public {
+        TreasuryFundedFarmingInit.initLockstakeFarm(lfp, lockstakeEngine);
     }
 }
 
