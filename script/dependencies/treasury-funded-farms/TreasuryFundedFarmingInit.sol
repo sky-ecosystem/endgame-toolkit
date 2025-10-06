@@ -16,9 +16,7 @@
 pragma solidity ^0.8.16;
 
 import {StakingRewardsInit, StakingRewardsInitParams} from "../StakingRewardsInit.sol";
-import {
-    VestedRewardsDistributionInit, VestedRewardsDistributionInitParams
-} from "../VestedRewardsDistributionInit.sol";
+import {VestedRewardsDistributionInit, VestedRewardsDistributionInitParams} from "../VestedRewardsDistributionInit.sol";
 import {VestInit, VestCreateParams} from "../VestInit.sol";
 
 struct FarmingInitParams {
@@ -46,36 +44,29 @@ library TreasuryFundedFarmingInit {
     ChainlogLike internal constant chainlog = ChainlogLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
     function initFarm(FarmingInitParams memory p) internal returns (FarmingInitResult memory r) {
-        require(DssVestWithGemLike(p.vest).gem() == p.rewardsToken, "TreasuryFundedFarmingInit/vest-gem-mismatch");
+        require(DssVestWithGemLike(p.vest).gem() == p.rewardsToken, "initFarm/vest-gem-mismatch");
 
         require(
             StakingRewardsLike(p.rewards).stakingToken() == p.stakingToken,
-            "TreasuryFundedFarmingInit/rewards-staking-token-mismatch"
+            "initFarm/rewards-staking-token-mismatch"
         );
         require(
             StakingRewardsLike(p.rewards).rewardsToken() == p.rewardsToken,
-            "TreasuryFundedFarmingInit/rewards-rewards-token-mismatch"
+            "initFarm/rewards-rewards-token-mismatch"
         );
-        require(StakingRewardsLike(p.rewards).rewardRate() == 0, "TreasuryFundedFarmingInit/reward-rate-not-zero");
+        require(StakingRewardsLike(p.rewards).rewardRate() == 0, "initFarm/reward-rate-not-zero");
         require(
             StakingRewardsLike(p.rewards).rewardsDistribution() == address(0),
-            "TreasuryFundedFarmingInit/rewards-distribution-already-set"
+            "initFarm/rewards-distribution-already-set"
         );
-        require(StakingRewardsLike(p.rewards).owner() == p.admin, "TreasuryFundedFarmingInit/invalid-owner");
+        require(StakingRewardsLike(p.rewards).owner() == p.admin, "initFarm/invalid-owner");
 
-        require(
-            VestedRewardsDistributionLike(p.dist).gem() == p.rewardsToken, "TreasuryFundedFarmingInit/dist-gem-mismatch"
-        );
-        require(
-            VestedRewardsDistributionLike(p.dist).dssVest() == p.vest,
-            "TreasuryFundedFarmingInit/dist-dss-vest-mismatch"
-        );
-        require(
-            VestedRewardsDistributionLike(p.dist).vestId() == 0, "TreasuryFundedFarmingInit/dist-vest-id-already-set"
-        );
+        require(VestedRewardsDistributionLike(p.dist).gem() == p.rewardsToken, "initFarm/dist-gem-mismatch");
+        require(VestedRewardsDistributionLike(p.dist).dssVest() == p.vest, "initFarm/dist-dss-vest-mismatch");
+        require(VestedRewardsDistributionLike(p.dist).vestId() == 0, "initFarm/dist-vest-id-already-set");
         require(
             VestedRewardsDistributionLike(p.dist).stakingRewards() == p.rewards,
-            "TreasuryFundedFarmingInit/dist-staking-rewards-mismatch"
+            "initFarm/dist-staking-rewards-mismatch"
         );
 
         // Set `dist` with  `rewardsDistribution` role in `rewards`.
@@ -96,7 +87,8 @@ library TreasuryFundedFarmingInit {
 
         // Create the proper vesting stream for rewards distribution.
         uint256 vestId = VestInit.create(
-            p.vest, VestCreateParams({usr: p.dist, tot: p.vestTot, bgn: p.vestBgn, tau: p.vestTau, eta: 0})
+            p.vest,
+            VestCreateParams({usr: p.dist, tot: p.vestTot, bgn: p.vestBgn, tau: p.vestTau, eta: 0})
         );
 
         // Set the `vestId` in `dist`
@@ -117,13 +109,16 @@ library TreasuryFundedFarmingInit {
         chainlog.setAddress(p.distKey, p.dist);
     }
 
-    function initLockstakeFarm(FarmingInitParams memory p, address lockstakeEngine)
-        internal
-        returns (FarmingInitResult memory r)
-    {
+    function initLockstakeFarm(FarmingInitParams memory p) internal returns (FarmingInitResult memory r) {
+        address lssky = chainlog.getAddress("LOCKSTAKE_SKY");
+        address lse = chainlog.getAddress("LOCKSTAKE_ENGINE");
+        require(p.stakingToken == lssky, "initLockstakeFarm/staking-token-not-lssky");
+
         r = initFarm(p);
-        LockstakeEngineLike(lockstakeEngine).addFarm(p.rewards);
+        LockstakeEngineLike(lse).addFarm(p.rewards);
     }
+
+    // TODO: add replacing of farm vest ID
 }
 
 interface WardsLike {
