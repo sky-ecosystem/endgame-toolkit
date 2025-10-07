@@ -41,6 +41,20 @@ struct FarmingInitResult {
     uint256 distributedAmount;
 }
 
+struct FarmingUpdateVestParams {
+    address dist;
+    uint256 vestTot;
+    uint256 vestBgn;
+    uint256 vestTau;
+}
+
+struct FarmingUpdateVestResult {
+    uint256 prevVestId;
+    uint256 prevDistributedAmount;
+    uint256 vestId;
+    uint256 distributedAmount;
+}
+
 library TreasuryFundedFarmingInit {
     ChainlogLike internal constant chainlog = ChainlogLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
@@ -107,13 +121,14 @@ library TreasuryFundedFarmingInit {
         chainlog.setAddress(p.distKey, p.dist);
     }
 
-    function initLockstakeFarm(FarmingInitParams memory p) internal returns (FarmingInitResult memory r) {
-        address lssky = chainlog.getAddress("LOCKSTAKE_SKY");
-        address lse = chainlog.getAddress("LOCKSTAKE_ENGINE");
+    function initLockstakeFarm(FarmingInitParams memory p, address lockstakeEngine)
+        internal
+        returns (FarmingInitResult memory r)
+    {
+        address lssky = LockstakeEngineLike(lockstakeEngine).lssky();
         require(p.stakingToken == lssky, "initLockstakeFarm/staking-token-not-lssky");
-
         r = initFarm(p);
-        LockstakeEngineLike(lse).addFarm(p.rewards);
+        LockstakeEngineLike(lockstakeEngine).addFarm(p.rewards);
     }
 }
 
@@ -123,6 +138,9 @@ interface WardsLike {
 
 interface DssVestWithGemLike {
     function cap() external view returns (uint256);
+    function rxd(uint256 vestid) external view returns (uint256);
+    function tot(uint256 vestid) external view returns (uint256);
+    function yank(uint256 vestid) external;
     function gem() external view returns (address);
     function file(bytes32 key, uint256 value) external;
     function unpaid(uint256 vestid) external view returns (uint256);
@@ -160,4 +178,5 @@ interface VestedRewardsDistributionJobLike {
 
 interface LockstakeEngineLike {
     function addFarm(address farm) external;
+    function lssky() external view returns (address);
 }

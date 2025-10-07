@@ -60,7 +60,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             distJob: distJob,
             distJobInterval: 7 days - 1 hours,
             vest: vest,
-            vestTot: 2_400_000,
+            vestTot: 2_400_000 * 10 ** 18,
             vestBgn: block.timestamp - 7 days,
             vestTau: 365 days
         });
@@ -90,7 +90,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             distJob: distJob,
             distJobInterval: 7 days - 1 hours,
             vest: vest,
-            vestTot: 2_400_000,
+            vestTot: 2_400_000 * 10 ** 18,
             vestBgn: block.timestamp - 7 days,
             vestTau: 365 days
         });
@@ -115,17 +115,64 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         uint256 vestCount;
     }
 
-    function testInitFarm() public {
-        CheckInitFarmValuesBefore memory v = _checkInitFarmActions_before(lfp);
+    function testFarm_init() public {
+        CheckInitFarmValuesBefore memory v = _checkFarm_init_beforeSpell(lfp);
 
         // Simulate spell casting
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
 
-        _checkInitFarmActions_after(fp, v);
+        _checkFarm_init_afterSpell(fp, v);
     }
 
-    function testRevert_initFarm_WhenMismatchingParams() public {
+    function testFarm_integration_stakeGetRewardAndwithdraw() internal {
+        // Simulate spell casting
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+        // Set `stakingToken` balance of the testing contract.
+        uint256 stakeAmt = 100_000 * 10 ** 18;
+        address usr = address(this);
+        deal(address(fp.stakingToken), usr, stakeAmt);
+
+        // Approve `stakingToken` to the farming contract.
+        ERC20Like(fp.stakingToken).approve(fp.rewards, stakeAmt);
+
+        // Stake `stakingToken`
+        uint256 pstakedBalance = StakingRewardsLike(fp.rewards).balanceOf(usr);
+        StakingRewardsLike(fp.rewards).stake(stakeAmt);
+        uint256 stakedBalance = StakingRewardsLike(fp.rewards).balanceOf(usr);
+        assertEq(stakedBalance, pstakedBalance + stakeAmt, "_checkFarm_integration/staked-balance mismatch");
+
+        // Accumulate rewards
+        vm.warp(block.timestamp + 1 days);
+
+        // Check earned rewards
+        uint256 earnedAmt = StakingRewardsLike(fp.rewards).earned(usr);
+        assertGt(earnedAmt, 0, "_checkFarm_integration/earned-amt mismatch");
+
+        // Claim earned rewards
+        uint256 prewardsTokenBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
+        StakingRewardsLike(fp.rewards).getReward();
+        uint256 rewardsTokenBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
+        assertEq(
+            rewardsTokenBalance,
+            prewardsTokenBalance + earnedAmt,
+            "_checkFarm_integration/rewards-token-balance-mismatch"
+        );
+
+        // Withdraw staked tokens
+        uint256 pstakingTokenBalance = ERC20Like(fp.stakingToken).balanceOf(usr);
+        StakingRewardsLike(fp.rewards).withdraw(stakeAmt);
+        uint256 stakingTokenBalance = ERC20Like(fp.stakingToken).balanceOf(usr);
+        assertEq(
+            stakingTokenBalance,
+            pstakingTokenBalance + stakeAmt,
+            "_checkFarm_integration/staking-token-balance-mismatch"
+        );
+    }
+
+    function testRevert_farm_init_whenMismatchingParams() public {
         // vest.gem != fp.rewardsToken
         {
             vm.mockCall(address(fp.vest), abi.encodeWithSignature("gem()"), abi.encode(address(0x1337)));
@@ -228,8 +275,8 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         }
     }
 
-    function testInitLockstakeFarm() public {
-        CheckInitFarmValuesBefore memory v = _checkInitFarmActions_before(lfp);
+    function testLockstakeFarm_init() public {
+        CheckInitFarmValuesBefore memory v = _checkFarm_init_beforeSpell(lfp);
 
         assertEq(
             uint8(LockstakeEngineLike(lockstakeEngine).farms(lfp.rewards)),
@@ -239,9 +286,9 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
         // Simulate spell casting
         vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp)));
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp, lockstakeEngine)));
 
-        _checkInitFarmActions_after(lfp, v);
+        _checkFarm_init_afterSpell(lfp, v);
 
         assertEq(
             uint8(LockstakeEngineLike(lockstakeEngine).farms(lfp.rewards)),
@@ -250,16 +297,76 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
     }
 
-    function testRevert_initLockstakeFarm_WhenStakingTokenIsNotLssky() public {
+    function testLockstakeFarm_integration_openSelectFarmLockGetRewardAndFree() public {
+        // Simulate spell casting
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp, lockstakeEngine)));
+
+        // Open a new urn
+        address owner = address(this);
+
+        uint256 ownerUrnsCount = LockstakeEngineLike(lockstakeEngine).ownerUrnsCount(owner);
+        assertEq(ownerUrnsCount, 0, "_checkLockstakeFarm_integration/owner-urns-count-mismatch");
+
+        uint256 urnIndex = ownerUrnsCount;
+        address urn = LockstakeEngineLike(lockstakeEngine).open(urnIndex);
+
+        // Select a farm
+        LockstakeEngineLike(lockstakeEngine).selectFarm(owner, urnIndex, lfp.rewards, 0);
+        assertEq(
+            LockstakeEngineLike(lockstakeEngine).urnFarms(urn),
+            lfp.rewards,
+            "_checkLockstakeFarm_integration/urn-farm mismatch"
+        );
+
+        // Lock tokens
+        address lockToken = LockstakeEngineLike(lockstakeEngine).sky();
+        uint256 lockAmt = 2_400_000 * 10 ** 18;
+        deal(address(lockToken), owner, lockAmt);
+
+        ERC20Like(lockToken).approve(lockstakeEngine, type(uint256).max);
+        LockstakeEngineLike(lockstakeEngine).lock(owner, urnIndex, lockAmt, 0);
+
+        // Check staking token balance for the urn
+        uint256 stakedAmt = StakingRewardsLike(lfp.rewards).balanceOf(urn);
+        assertEq(stakedAmt, lockAmt, "_checkLockstakeFarm_integration/staking-token-balance-mismatch");
+
+        // Accumulate rewards
+        vm.warp(block.timestamp + 1 days);
+
+        // Check earned rewards
+        uint256 earnedAmt = StakingRewardsLike(lfp.rewards).earned(urn);
+        assertGt(earnedAmt, 0, "_checkFarm_integration/earned-amt mismatch");
+
+        // Get rewards
+        uint256 prewardsTokenBalance = ERC20Like(lfp.rewardsToken).balanceOf(owner);
+        LockstakeEngineLike(lockstakeEngine).getReward(owner, urnIndex, lfp.rewards, owner);
+        uint256 rewardsTokenBalance = ERC20Like(lfp.rewardsToken).balanceOf(owner);
+        assertEq(
+            rewardsTokenBalance,
+            prewardsTokenBalance + earnedAmt,
+            "_checkLockstakeFarm_integration/rewards-token-balance mismatch"
+        );
+
+        // Free urn
+        uint256 plockTokenBalance = ERC20Like(lockToken).balanceOf(owner);
+        LockstakeEngineLike(lockstakeEngine).free(owner, urnIndex, owner, lockAmt);
+        uint256 lockTokenBalance = ERC20Like(lockToken).balanceOf(owner);
+        assertEq(
+            lockTokenBalance, plockTokenBalance + lockAmt, "_checkLockstakeFarm_integration/lock-token-balance mismatch"
+        );
+    }
+
+    function testRevert_lockstakeFarm_init_whenStakingTokenIsNotLssky() public {
         lfp.stakingToken = usds;
 
         // Simulate spell casting
         vm.prank(pause);
         vm.expectRevert("ds-pause-delegatecall-error");
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp)));
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp, lockstakeEngine)));
     }
 
-    function _checkInitFarmActions_before(FarmingInitParams memory p)
+    function _checkFarm_init_beforeSpell(FarmingInitParams memory p)
         internal
         view
         returns (CheckInitFarmValuesBefore memory v)
@@ -288,10 +395,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         v.vestCount = DssVestWithGemLike(p.vest).ids();
     }
 
-    function _checkInitFarmActions_after(FarmingInitParams memory p, CheckInitFarmValuesBefore memory v)
-        internal
-        view
-    {
+    function _checkFarm_init_afterSpell(FarmingInitParams memory p, CheckInitFarmValuesBefore memory v) internal view {
         assertEq(StakingRewardsLike(p.rewards).rewardRate(), p.vestTot / p.vestTau, "after: should set reward rate");
         assertEq(
             StakingRewardsLike(p.rewards).rewardsDistribution(),
@@ -334,12 +438,12 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 }
 
 contract MockSpell {
-    function initFarm(FarmingInitParams memory lfp) public {
-        TreasuryFundedFarmingInit.initFarm(lfp);
+    function initFarm(FarmingInitParams memory p) public {
+        TreasuryFundedFarmingInit.initFarm(p);
     }
 
-    function initLockstakeFarm(FarmingInitParams memory lfp) public {
-        TreasuryFundedFarmingInit.initLockstakeFarm(lfp);
+    function initLockstakeFarm(FarmingInitParams memory p, address lockstakeEngine) public {
+        TreasuryFundedFarmingInit.initLockstakeFarm(p, address(lockstakeEngine));
     }
 }
 
@@ -353,39 +457,31 @@ interface ProxyLike {
 
 interface DssVestWithGemLike {
     function cap() external view returns (uint256);
-
     function gem() external view returns (address);
-
     function ids() external view returns (uint256);
-
     function rxd(uint256 vestid) external view returns (uint256);
-
     function unpaid(uint256 vestid) external view returns (uint256);
 }
 
 interface StakingRewardsLike {
+    function balanceOf(address who) external view returns (uint256);
+    function earned(address who) external view returns (uint256);
+    function getReward() external;
     function owner() external view returns (address);
-
     function rewardRate() external view returns (uint256);
-
     function rewardsDistribution() external view returns (address);
-
     function rewardsToken() external view returns (address);
-
+    function stake(uint256 amount) external;
     function stakingToken() external view returns (address);
+    function withdraw(uint256 amount) external;
 }
 
 interface VestedRewardsDistributionLike {
     function dssVest() external view returns (address);
-
     function distribute() external;
-
     function gem() external view returns (address);
-
     function lastDistributedAt() external view returns (uint256);
-
     function stakingRewards() external view returns (address);
-
     function vestId() external view returns (uint256);
 }
 
@@ -395,6 +491,8 @@ interface VestedRewardsDistributionJobLike {
 
 interface ERC20Like {
     function allowance(address owner, address spender) external view returns (uint256);
+    function approve(address spender, uint256 amount) external;
+    function balanceOf(address who) external view returns (uint256);
 }
 
 interface LockstakeEngineLike {
@@ -405,4 +503,12 @@ interface LockstakeEngineLike {
     }
 
     function farms(address farm) external view returns (FarmStatus);
+    function free(address owner, uint256 urnIndex, address to, uint256 wad) external;
+    function getReward(address owner, uint256 index, address farm, address to) external returns (uint256 amt);
+    function lock(address owner, uint256 urnIndex, uint256 wad, uint16 ref) external;
+    function open(uint256 urnIndex) external returns (address urn);
+    function ownerUrnsCount(address owner) external view returns (uint256);
+    function selectFarm(address owner, uint256 urnIndex, address farm, uint16 ref) external;
+    function sky() external view returns (address);
+    function urnFarms(address urn) external view returns (address);
 }
