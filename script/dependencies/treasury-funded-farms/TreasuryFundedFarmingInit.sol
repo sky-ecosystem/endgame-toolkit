@@ -16,11 +16,12 @@
 pragma solidity ^0.8.16;
 
 import {StakingRewardsInit, StakingRewardsInitParams} from "../StakingRewardsInit.sol";
-import {VestedRewardsDistributionInit, VestedRewardsDistributionInitParams} from "../VestedRewardsDistributionInit.sol";
+import {
+    VestedRewardsDistributionInit, VestedRewardsDistributionInitParams
+} from "../VestedRewardsDistributionInit.sol";
 import {VestInit, VestCreateParams} from "../VestInit.sol";
 
 struct FarmingInitParams {
-    address admin;
     address stakingToken;
     address rewardsToken;
     address rewards;
@@ -37,7 +38,7 @@ struct FarmingInitParams {
 
 struct FarmingInitResult {
     uint256 vestId;
-    uint256 initialDistribution;
+    uint256 distributedAmount;
 }
 
 library TreasuryFundedFarmingInit {
@@ -47,19 +48,17 @@ library TreasuryFundedFarmingInit {
         require(DssVestWithGemLike(p.vest).gem() == p.rewardsToken, "initFarm/vest-gem-mismatch");
 
         require(
-            StakingRewardsLike(p.rewards).stakingToken() == p.stakingToken,
-            "initFarm/rewards-staking-token-mismatch"
+            StakingRewardsLike(p.rewards).stakingToken() == p.stakingToken, "initFarm/rewards-staking-token-mismatch"
         );
         require(
-            StakingRewardsLike(p.rewards).rewardsToken() == p.rewardsToken,
-            "initFarm/rewards-rewards-token-mismatch"
+            StakingRewardsLike(p.rewards).rewardsToken() == p.rewardsToken, "initFarm/rewards-rewards-token-mismatch"
         );
         require(StakingRewardsLike(p.rewards).rewardRate() == 0, "initFarm/reward-rate-not-zero");
         require(
             StakingRewardsLike(p.rewards).rewardsDistribution() == address(0),
             "initFarm/rewards-distribution-already-set"
         );
-        require(StakingRewardsLike(p.rewards).owner() == p.admin, "initFarm/invalid-owner");
+        require(StakingRewardsLike(p.rewards).owner() == address(this), "initFarm/invalid-owner");
 
         require(VestedRewardsDistributionLike(p.dist).gem() == p.rewardsToken, "initFarm/dist-gem-mismatch");
         require(VestedRewardsDistributionLike(p.dist).dssVest() == p.vest, "initFarm/dist-dss-vest-mismatch");
@@ -74,7 +73,7 @@ library TreasuryFundedFarmingInit {
 
         // Increase `rewardsToken` `p.vest` allowance from the treasury for `p.vestTot`.
         // Note: `p.vest` is expected to be of type `DssVestTransferrable`
-        uint256 allowance = ERC20Like(p.rewardsToken).allowance(p.admin, p.vest);
+        uint256 allowance = ERC20Like(p.rewardsToken).allowance(address(this), p.vest);
         ERC20Like(p.rewardsToken).approve(p.vest, allowance + p.vestTot);
 
         // Check if `p.vest.cap` needs to be adjusted based on the new vest rate.
@@ -87,8 +86,7 @@ library TreasuryFundedFarmingInit {
 
         // Create the proper vesting stream for rewards distribution.
         uint256 vestId = VestInit.create(
-            p.vest,
-            VestCreateParams({usr: p.dist, tot: p.vestTot, bgn: p.vestBgn, tau: p.vestTau, eta: 0})
+            p.vest, VestCreateParams({usr: p.dist, tot: p.vestTot, bgn: p.vestBgn, tau: p.vestTau, eta: 0})
         );
 
         // Set the `vestId` in `dist`
@@ -103,7 +101,7 @@ library TreasuryFundedFarmingInit {
         VestedRewardsDistributionJobLike(p.distJob).set(p.dist, p.distJobInterval);
 
         r.vestId = vestId;
-        r.initialDistribution = unpaid;
+        r.distributedAmount = unpaid;
 
         chainlog.setAddress(p.rewardsKey, p.rewards);
         chainlog.setAddress(p.distKey, p.dist);

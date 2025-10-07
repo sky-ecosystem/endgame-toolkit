@@ -17,7 +17,10 @@ pragma solidity ^0.8.16;
 
 import {DssTest} from "dss-test/DssTest.sol";
 import {StakingRewardsDeploy, StakingRewardsDeployParams} from "../StakingRewardsDeploy.sol";
-import {VestedRewardsDistributionDeploy, VestedRewardsDistributionDeployParams} from "../VestedRewardsDistributionDeploy.sol";
+import {
+    VestedRewardsDistributionDeploy,
+    VestedRewardsDistributionDeployParams
+} from "../VestedRewardsDistributionDeploy.sol";
 import {TreasuryFundedFarmingInit, FarmingInitParams} from "./TreasuryFundedFarmingInit.sol";
 
 contract TreasuryFundedFarmingInitTest is DssTest {
@@ -48,7 +51,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         distJob = chainlog.getAddress("CRON_REWARDS_DIST_JOB");
 
         lfp = FarmingInitParams({
-            admin: pauseProxy,
             stakingToken: lssky,
             rewardsToken: sky,
             rewards: address(0),
@@ -79,7 +81,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
 
         fp = FarmingInitParams({
-            admin: pauseProxy,
             stakingToken: usds,
             rewardsToken: sky,
             rewards: address(0),
@@ -94,11 +95,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vestTau: 365 days
         });
         fp.rewards = StakingRewardsDeploy.deploy(
-            StakingRewardsDeployParams({
-                owner: pauseProxy,
-                stakingToken: fp.stakingToken,
-                rewardsToken: fp.rewardsToken
-            })
+            StakingRewardsDeployParams({owner: pauseProxy, stakingToken: fp.stakingToken, rewardsToken: fp.rewardsToken})
         );
         fp.dist = VestedRewardsDistributionDeploy.deploy(
             VestedRewardsDistributionDeployParams({
@@ -176,9 +173,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         // rewards.rewardsDistribution != address(0)
         {
             vm.mockCall(
-                address(fp.rewards),
-                abi.encodeWithSignature("rewardsDistribution()"),
-                abi.encode(address(0x1337))
+                address(fp.rewards), abi.encodeWithSignature("rewardsDistribution()"), abi.encode(address(0x1337))
             );
 
             vm.expectRevert("ds-pause-delegatecall-error");
@@ -264,20 +259,20 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp)));
     }
 
-    function _checkInitFarmActions_before(
-        FarmingInitParams memory p
-    ) internal view returns (CheckInitFarmValuesBefore memory v) {
+    function _checkInitFarmActions_before(FarmingInitParams memory p)
+        internal
+        view
+        returns (CheckInitFarmValuesBefore memory v)
+    {
         // Sanity checks
         assertEq(DssVestWithGemLike(p.vest).gem(), sky, "before: gem mismatch");
 
         assertEq(StakingRewardsLike(p.rewards).stakingToken(), p.stakingToken, "before: staking token mismatch");
         assertEq(StakingRewardsLike(p.rewards).rewardsToken(), p.rewardsToken, "before: rewards token mismatch");
         assertEq(StakingRewardsLike(p.rewards).rewardRate(), 0, "before: reward rate mismatch");
-        assertEq(StakingRewardsLike(p.rewards).owner(), p.admin, "before: rewards owner mismatch");
+        assertEq(StakingRewardsLike(p.rewards).owner(), pauseProxy, "before: rewards owner mismatch");
         assertEq(
-            StakingRewardsLike(p.rewards).rewardsDistribution(),
-            address(0),
-            "before: rewards distribution mismatch"
+            StakingRewardsLike(p.rewards).rewardsDistribution(), address(0), "before: rewards distribution mismatch"
         );
 
         assertEq(VestedRewardsDistributionLike(p.dist).gem(), p.rewardsToken, "before: gem mismatch");
@@ -288,12 +283,15 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertFalse(VestedRewardsDistributionJobLike(p.distJob).has(p.dist), "before: job should not have dist");
 
         // Initial state
-        v.allowance = ERC20Like(p.rewardsToken).allowance(p.admin, p.vest);
+        v.allowance = ERC20Like(p.rewardsToken).allowance(pauseProxy, p.vest);
         v.cap = DssVestWithGemLike(p.vest).cap();
         v.vestCount = DssVestWithGemLike(p.vest).ids();
     }
 
-    function _checkInitFarmActions_after(FarmingInitParams memory p, CheckInitFarmValuesBefore memory v) internal view {
+    function _checkInitFarmActions_after(FarmingInitParams memory p, CheckInitFarmValuesBefore memory v)
+        internal
+        view
+    {
         assertEq(StakingRewardsLike(p.rewards).rewardRate(), p.vestTot / p.vestTau, "after: should set reward rate");
         assertEq(
             StakingRewardsLike(p.rewards).rewardsDistribution(),
@@ -302,9 +300,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
 
         assertEq(
-            VestedRewardsDistributionLike(p.dist).vestId(),
-            v.vestCount + 1,
-            "after: should set the correct vestId"
+            VestedRewardsDistributionLike(p.dist).vestId(), v.vestCount + 1, "after: should set the correct vestId"
         );
         // Should distribute only if vesting period has already started
         if (p.vestBgn < block.timestamp) {
@@ -318,21 +314,15 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertTrue(VestedRewardsDistributionJobLike(p.distJob).has(p.dist), "after: job should have dist");
 
         assertEq(
-            DssVestWithGemLike(p.vest).ids(),
-            v.vestCount + 1,
-            "after: should have created exactly 1 new vesting stream"
+            DssVestWithGemLike(p.vest).ids(), v.vestCount + 1, "after: should have created exactly 1 new vesting stream"
         );
         assertEq(
-            DssVestWithGemLike(p.vest).unpaid(v.vestCount + 1),
-            0,
-            "after: should have distributed any unpaid amount"
+            DssVestWithGemLike(p.vest).unpaid(v.vestCount + 1), 0, "after: should have distributed any unpaid amount"
         );
         // Note: if there was a distribution, the allowance would've been decreased by the paid amount
         uint256 expectedAllowance = v.allowance + p.vestTot - DssVestWithGemLike(p.vest).rxd(v.vestCount + 1);
         assertEq(
-            ERC20Like(sky).allowance(p.admin, p.vest),
-            expectedAllowance,
-            "after: should set the correct allowance"
+            ERC20Like(sky).allowance(pauseProxy, p.vest), expectedAllowance, "after: should set the correct allowance"
         );
 
         // Adds 10% buffer
