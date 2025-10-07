@@ -41,20 +41,6 @@ struct FarmingInitResult {
     uint256 distributedAmount;
 }
 
-struct FarmingUpdateVestParams {
-    address dist;
-    uint256 vestTot;
-    uint256 vestBgn;
-    uint256 vestTau;
-}
-
-struct FarmingUpdateVestResult {
-    uint256 prevVestId;
-    uint256 prevDistributedAmount;
-    uint256 vestId;
-    uint256 distributedAmount;
-}
-
 library TreasuryFundedFarmingInit {
     ChainlogLike internal constant chainlog = ChainlogLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
