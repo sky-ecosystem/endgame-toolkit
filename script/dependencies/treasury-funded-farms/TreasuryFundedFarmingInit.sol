@@ -41,6 +41,20 @@ struct FarmingInitResult {
     uint256 distributedAmount;
 }
 
+struct FarmingUpdateVestParams {
+    address dist;
+    uint256 vestTot;
+    uint256 vestBgn;
+    uint256 vestTau;
+}
+
+struct FarmingUpdateVestResult {
+    uint256 prevVestId;
+    uint256 prevDistributedAmount;
+    uint256 vestId;
+    uint256 distributedAmount;
+}
+
 library TreasuryFundedFarmingInit {
     ChainlogLike internal constant chainlog = ChainlogLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
@@ -115,6 +129,49 @@ library TreasuryFundedFarmingInit {
         require(p.stakingToken == lssky, "initLockstakeFarm/staking-token-not-lssky");
         r = initFarm(p);
         LockstakeEngineLike(lockstakeEngine).addFarm(p.rewards);
+    }
+
+    function updateFarmVest(FarmingUpdateVestParams memory p) internal returns (FarmingUpdateVestResult memory r) {
+        address vest = VestedRewardsDistributionLike(p.dist).dssVest();
+        address rewardsToken = VestedRewardsDistributionLike(p.dist).gem();
+        uint256 prevVestId = VestedRewardsDistributionLike(p.dist).vestId();
+
+        // Check if there is a distribution to be done in the previous vesting stream.
+        uint256 prevUnpaid = DssVestWithGemLike(vest).unpaid(r.prevVestId);
+        if (prevUnpaid > 0) {
+            VestedRewardsDistributionLike(p.dist).distribute();
+        }
+
+        // Get the remaining allawance of the previous vesting stream.
+        // Note: `vest` is expected to be of type `DssVestTransferrable`
+        uint256 currAllowance = ERC20Like(rewardsToken).allowance(address(this), vest);
+        uint256 prevVestTot = DssVestWithGemLike(vest).tot(r.prevVestId);
+        uint256 prevVestRxd = DssVestWithGemLike(vest).rxd(r.prevVestId);
+
+        // Adjust the allowance considering the previous vest unclaimed amount and the new vest total.
+        ERC20Like(rewardsToken).approve(vest, currAllowance + p.vestTot - (prevVestTot - prevVestRxd));
+
+        // Yank the previous vesting stream.
+        DssVestWithGemLike(vest).yank(prevVestId);
+
+        // Create a new vesting stream for rewards distribution.
+        uint256 vestId = VestInit.create(
+            vest, VestCreateParams({usr: p.dist, tot: p.vestTot, bgn: p.vestBgn, tau: p.vestTau, eta: 0})
+        );
+
+        // Set the `vestId` in `dist`
+        VestedRewardsDistributionInit.init(p.dist, VestedRewardsDistributionInitParams({vestId: vestId}));
+
+        // Check if the first distribution is already available and then distribute.
+        uint256 unpaid = DssVestWithGemLike(vest).unpaid(vestId);
+        if (unpaid > 0) {
+            VestedRewardsDistributionLike(p.dist).distribute();
+        }
+
+        r.prevVestId = prevVestId;
+        r.prevDistributedAmount = prevUnpaid;
+        r.vestId = vestId;
+        r.distributedAmount = unpaid;
     }
 }
 

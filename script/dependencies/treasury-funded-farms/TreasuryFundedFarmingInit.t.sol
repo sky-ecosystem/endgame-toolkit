@@ -435,6 +435,8 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             assertEq(DssVestWithGemLike(p.vest).cap(), expectedRateWithBuffer, "after: should set the correct cap");
         }
     }
+
+    // TODO: add test to updateFarmVest
 }
 
 contract MockSpell {
