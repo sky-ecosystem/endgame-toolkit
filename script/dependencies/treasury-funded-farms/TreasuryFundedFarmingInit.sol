@@ -115,8 +115,6 @@ library TreasuryFundedFarmingInit {
         r = initFarm(p);
         LockstakeEngineLike(lse).addFarm(p.rewards);
     }
-
-    // TODO: add replacing of farm vest ID
 }
 
 interface WardsLike {
