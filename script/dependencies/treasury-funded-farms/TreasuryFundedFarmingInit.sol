@@ -16,10 +16,10 @@
 pragma solidity ^0.8.16;
 
 import {StakingRewardsInit, StakingRewardsInitParams} from "../StakingRewardsInit.sol";
+import {VestInit, VestCreateParams} from "../VestInit.sol";
 import {
     VestedRewardsDistributionInit, VestedRewardsDistributionInitParams
 } from "../VestedRewardsDistributionInit.sol";
-import {VestInit, VestCreateParams} from "../VestInit.sol";
 
 struct FarmingInitParams {
     address stakingToken;
@@ -125,47 +125,34 @@ interface WardsLike {
 
 interface DssVestWithGemLike {
     function cap() external view returns (uint256);
-
     function gem() external view returns (address);
-
     function file(bytes32 key, uint256 value) external;
-
     function unpaid(uint256 vestid) external view returns (uint256);
 }
 
 interface StakingRewardsLike {
     function owner() external view returns (address);
-
     function rewardRate() external view returns (uint256);
-
     function rewardsDistribution() external view returns (address);
-
     function rewardsToken() external view returns (address);
-
     function stakingToken() external view returns (address);
 }
 
 interface VestedRewardsDistributionLike {
     function dssVest() external view returns (address);
-
     function distribute() external;
-
     function gem() external view returns (address);
-
     function stakingRewards() external view returns (address);
-
     function vestId() external view returns (uint256);
 }
 
 interface ChainlogLike {
     function getAddress(bytes32 key) external view returns (address);
-
     function setAddress(bytes32 key, address addr) external;
 }
 
 interface ERC20Like {
     function allowance(address owner, address spender) external view returns (uint256);
-
     function approve(address spender, uint256 amount) external;
 }
 
