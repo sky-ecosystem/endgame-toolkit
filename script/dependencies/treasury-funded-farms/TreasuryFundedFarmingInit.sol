@@ -119,16 +119,9 @@ library TreasuryFundedFarmingInit {
     }
 }
 
-interface WardsLike {
-    function wards(address who) external view returns (uint256);
-}
-
 interface DssVestTransferrableLike {
     function cap() external view returns (uint256);
     function czar() external view returns (address);
-    function rxd(uint256 vestid) external view returns (uint256);
-    function tot(uint256 vestid) external view returns (uint256);
-    function yank(uint256 vestid) external;
     function gem() external view returns (address);
     function file(bytes32 key, uint256 value) external;
     function unpaid(uint256 vestid) external view returns (uint256);
@@ -151,7 +144,6 @@ interface VestedRewardsDistributionLike {
 }
 
 interface ChainlogLike {
-    function getAddress(bytes32 key) external view returns (address);
     function setAddress(bytes32 key, address addr) external;
 }
 
