@@ -31,9 +31,9 @@ struct FarmingInitParams {
     address distJob;
     uint256 distJobInterval; // in seconds
     address vest;
-    uint256 vestTot;
-    uint256 vestBgn;
-    uint256 vestTau;
+    uint256 vestTot; // wad
+    uint256 vestBgn; // unix timestamp
+    uint256 vestTau; // in seconds
 }
 
 struct FarmingInitResult {
