@@ -175,7 +175,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     function testRevert_farm_init_whenMismatchingParams() public {
         // vest.czar != pauseProxy
         {
-            vm.mockCall(address(fp.vest), abi.encodeWithSignature("czaz()"), abi.encode(address(0x1337)));
+            vm.mockCall(address(fp.vest), abi.encodeWithSignature("czar()"), abi.encode(address(0x1337)));
 
             vm.expectRevert("ds-pause-delegatecall-error");
             vm.prank(pause);
