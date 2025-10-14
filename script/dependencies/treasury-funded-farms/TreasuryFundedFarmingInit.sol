@@ -183,8 +183,10 @@ interface DssVestTransferrableLike {
     function czar() external view returns (address);
     function gem() external view returns (address);
     function file(bytes32 key, uint256 value) external;
+    function rxd(uint256 vestId) external view returns (uint256);
     function tot(uint256 vestId) external view returns (uint256);
     function unpaid(uint256 vestId) external view returns (uint256);
+    function yank(uint256 vestId) external;
 }
 
 interface StakingRewardsLike {
