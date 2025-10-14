@@ -116,7 +116,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     }
 
     function testFarm_init() public {
-        CheckInitFarmValuesBefore memory v = _checkFarm_init_beforeSpell(lfp);
+        CheckInitFarmValuesBefore memory v = _checkFarm_init_beforeSpell(fp);
 
         // Simulate spell casting
         vm.prank(pause);
@@ -125,7 +125,25 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         _checkFarm_init_afterSpell(fp, v);
     }
 
-    function testFarm_integration_stakeGetRewardAndwithdraw() internal {
+    function testFarm_init_whenVestingRateIsGreaterThanCurrentVestCap() public {
+        CheckInitFarmValuesBefore memory v;
+
+        // Force `vest.cap()` to return a lower value
+        {
+            vm.mockCall(address(fp.vest), abi.encodeWithSignature("cap()"), abi.encode(uint256(0)));
+
+            v = _checkFarm_init_beforeSpell(fp);
+
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        _checkFarm_init_afterSpell(fp, v);
+    }
+
+    function testFarm_integration_stakeGetRewardAndWithdraw() internal {
         // Simulate spell casting
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
@@ -445,7 +463,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
 
         // Adds 10% buffer
-        uint256 expectedRateWithBuffer = (11 * p.vestTot) / p.vestTau / 10;
+        uint256 expectedRateWithBuffer = (11 * p.vestTot) / (10 * p.vestTau);
         if (expectedRateWithBuffer > v.cap) {
             assertEq(
                 DssVestTransferrableLike(p.vest).cap(), expectedRateWithBuffer, "after: should set the correct cap"

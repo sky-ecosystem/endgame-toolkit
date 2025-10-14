@@ -80,7 +80,7 @@ library TreasuryFundedFarmingInit {
         // Check if `p.vest.cap` needs to be adjusted based on the new vest rate.
         // Note: adds 10% buffer to the rate, as usual for this parameter.
         uint256 cap = DssVestTransferrableLike(p.vest).cap();
-        uint256 rateWithBuffer = (110 * (p.vestTot / p.vestTau)) / 100;
+        uint256 rateWithBuffer = (110 * p.vestTot) / (100 * p.vestTau);
         if (rateWithBuffer > cap) {
             DssVestTransferrableLike(p.vest).file("cap", rateWithBuffer);
         }
