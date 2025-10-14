@@ -141,21 +141,21 @@ library TreasuryFundedFarmingInit {
         uint256 prevVestId = VestedRewardsDistributionLike(p.dist).vestId();
 
         // Check if there is a distribution to be done in the previous vesting stream.
-        uint256 prevUnpaid = DssVestWithGemLike(vest).unpaid(r.prevVestId);
+        uint256 prevUnpaid = DssVestTransferrableLike(vest).unpaid(r.prevVestId);
         if (prevUnpaid > 0) {
             VestedRewardsDistributionLike(p.dist).distribute();
         }
 
         // Get the remaining allawance of the previous vesting stream.
         uint256 currAllowance = ERC20Like(rewardsToken).allowance(address(this), vest);
-        uint256 prevVestTot = DssVestWithGemLike(vest).tot(r.prevVestId);
-        uint256 prevVestRxd = DssVestWithGemLike(vest).rxd(r.prevVestId);
+        uint256 prevVestTot = DssVestTransferrableLike(vest).tot(r.prevVestId);
+        uint256 prevVestRxd = DssVestTransferrableLike(vest).rxd(r.prevVestId);
 
         // Adjust the allowance considering the previous vest unclaimed amount and the new vest total.
         ERC20Like(rewardsToken).approve(vest, currAllowance + p.vestTot - (prevVestTot - prevVestRxd));
 
         // Yank the previous vesting stream.
-        DssVestWithGemLike(vest).yank(prevVestId);
+        DssVestTransferrableLike(vest).yank(prevVestId);
 
         // Create a new vesting stream for rewards distribution.
         uint256 vestId = VestInit.create(
@@ -166,7 +166,7 @@ library TreasuryFundedFarmingInit {
         VestedRewardsDistributionInit.init(p.dist, VestedRewardsDistributionInitParams({vestId: vestId}));
 
         // Check if the first distribution is already available and then distribute.
-        uint256 unpaid = DssVestWithGemLike(vest).unpaid(vestId);
+        uint256 unpaid = DssVestTransferrableLike(vest).unpaid(vestId);
         if (unpaid > 0) {
             VestedRewardsDistributionLike(p.dist).distribute();
         }
