@@ -31,9 +31,9 @@ struct FarmingInitParams {
     address distJob;
     uint256 distJobInterval; // in seconds
     address vest;
-    uint256 vestTot;
-    uint256 vestBgn;
-    uint256 vestTau;
+    uint256 vestTot; // wad
+    uint256 vestBgn; // unix timestamp
+    uint256 vestTau; // in seconds
 }
 
 struct FarmingInitResult {
@@ -59,7 +59,9 @@ library TreasuryFundedFarmingInit {
     ChainlogLike internal constant chainlog = ChainlogLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
     function initFarm(FarmingInitParams memory p) internal returns (FarmingInitResult memory r) {
-        require(DssVestWithGemLike(p.vest).gem() == p.rewardsToken, "initFarm/vest-gem-mismatch");
+        // Note: `p.vest` is expected to be of type `DssVestTransferrable`
+        require(DssVestTransferrableLike(p.vest).czar() == address(this), "initFarm/vest-czar-mismatch");
+        require(DssVestTransferrableLike(p.vest).gem() == p.rewardsToken, "initFarm/vest-gem-mismatch");
 
         require(
             StakingRewardsLike(p.rewards).stakingToken() == p.stakingToken, "initFarm/rewards-staking-token-mismatch"
@@ -86,16 +88,15 @@ library TreasuryFundedFarmingInit {
         StakingRewardsInit.init(p.rewards, StakingRewardsInitParams({dist: p.dist}));
 
         // Increase `rewardsToken` `p.vest` allowance from the treasury for `p.vestTot`.
-        // Note: `p.vest` is expected to be of type `DssVestTransferrable`
         uint256 allowance = ERC20Like(p.rewardsToken).allowance(address(this), p.vest);
         ERC20Like(p.rewardsToken).approve(p.vest, allowance + p.vestTot);
 
         // Check if `p.vest.cap` needs to be adjusted based on the new vest rate.
         // Note: adds 10% buffer to the rate, as usual for this parameter.
-        uint256 cap = DssVestWithGemLike(p.vest).cap();
-        uint256 rateWithBuffer = (110 * (p.vestTot / p.vestTau)) / 100;
+        uint256 cap = DssVestTransferrableLike(p.vest).cap();
+        uint256 rateWithBuffer = (110 * p.vestTot) / (100 * p.vestTau);
         if (rateWithBuffer > cap) {
-            DssVestWithGemLike(p.vest).file("cap", rateWithBuffer);
+            DssVestTransferrableLike(p.vest).file("cap", rateWithBuffer);
         }
 
         // Create the proper vesting stream for rewards distribution.
@@ -107,7 +108,7 @@ library TreasuryFundedFarmingInit {
         VestedRewardsDistributionInit.init(p.dist, VestedRewardsDistributionInitParams({vestId: vestId}));
 
         // Check if the first distribution is already available and then distribute.
-        uint256 unpaid = DssVestWithGemLike(p.vest).unpaid(vestId);
+        uint256 unpaid = DssVestTransferrableLike(p.vest).unpaid(vestId);
         if (unpaid > 0) {
             VestedRewardsDistributionLike(p.dist).distribute();
         }
@@ -175,18 +176,12 @@ library TreasuryFundedFarmingInit {
     }
 }
 
-interface WardsLike {
-    function wards(address who) external view returns (uint256);
-}
-
-interface DssVestWithGemLike {
+interface DssVestTransferrableLike {
     function cap() external view returns (uint256);
-    function rxd(uint256 vestid) external view returns (uint256);
-    function tot(uint256 vestid) external view returns (uint256);
-    function yank(uint256 vestid) external;
+    function czar() external view returns (address);
     function gem() external view returns (address);
     function file(bytes32 key, uint256 value) external;
-    function unpaid(uint256 vestid) external view returns (uint256);
+    function unpaid(uint256 vestId) external view returns (uint256);
 }
 
 interface StakingRewardsLike {
@@ -206,7 +201,6 @@ interface VestedRewardsDistributionLike {
 }
 
 interface ChainlogLike {
-    function getAddress(bytes32 key) external view returns (address);
     function setAddress(bytes32 key, address addr) external;
 }
 

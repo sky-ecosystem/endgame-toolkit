@@ -116,7 +116,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     }
 
     function testFarm_init() public {
-        CheckInitFarmValuesBefore memory v = _checkFarm_init_beforeSpell(lfp);
+        CheckInitFarmValuesBefore memory v = _checkFarm_init_beforeSpell(fp);
 
         // Simulate spell casting
         vm.prank(pause);
@@ -125,13 +125,33 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         _checkFarm_init_afterSpell(fp, v);
     }
 
-    function testFarm_integration_stakeGetRewardAndwithdraw() internal {
+    function testFarm_init_whenVestingRateIsGreaterThanCurrentVestCap() public {
+        CheckInitFarmValuesBefore memory v;
+
+        // Force `vest.cap()` to return a lower value
+        {
+            vm.mockCall(address(fp.vest), abi.encodeWithSignature("cap()"), abi.encode(uint256(0)));
+
+            v = _checkFarm_init_beforeSpell(fp);
+
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        _checkFarm_init_afterSpell(fp, v);
+    }
+
+    function testFarm_integration_stakeGetRewardAndWithdraw_Fuzz(uint256 stakeAmt) public {
+        // Bound `stakeAmt` to [1, 1_000_000_000_000]
+        stakeAmt = bound(stakeAmt, 1 * 10 ** 18, 1_000_000_000_000 * 10 ** 18);
+
         // Simulate spell casting
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
 
         // Set `stakingToken` balance of the testing contract.
-        uint256 stakeAmt = 100_000 * 10 ** 18;
         address usr = address(this);
         deal(address(fp.stakingToken), usr, stakeAmt);
 
@@ -173,6 +193,17 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     }
 
     function testRevert_farm_init_whenMismatchingParams() public {
+        // vest.czar != pauseProxy
+        {
+            vm.mockCall(address(fp.vest), abi.encodeWithSignature("czar()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
         // vest.gem != fp.rewardsToken
         {
             vm.mockCall(address(fp.vest), abi.encodeWithSignature("gem()"), abi.encode(address(0x1337)));
@@ -184,7 +215,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vm.clearMockedCalls();
         }
 
-        // reawards.stakingToken() != fp.stakingToken
+        // rewards.stakingToken() != fp.stakingToken
         {
             vm.mockCall(address(fp.rewards), abi.encodeWithSignature("stakingToken()"), abi.encode(address(0x1337)));
 
@@ -195,7 +226,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vm.clearMockedCalls();
         }
 
-        // reawards.rewardsToken() != fp.rewardsToken
+        // rewards.rewardsToken() != fp.rewardsToken
         {
             vm.mockCall(address(fp.rewards), abi.encodeWithSignature("rewardsToken()"), abi.encode(address(0x1337)));
 
@@ -230,7 +261,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vm.clearMockedCalls();
         }
 
-        // rewards.onwer() != MCD_PAUSE_PROXY
+        // rewards.owner() != MCD_PAUSE_PROXY
         {
             vm.mockCall(address(fp.rewards), abi.encodeWithSignature("owner()"), abi.encode(address(0x1337)));
 
@@ -297,7 +328,10 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
     }
 
-    function testLockstakeFarm_integration_openSelectFarmLockGetRewardAndFree() public {
+    function testLockstakeFarm_integration_openSelectFarmLockGetRewardAndFree_Fuzz(uint256 lockAmt) public {
+        // Bound lockAmt to [1, 1_000_000_000_000]
+        lockAmt = bound(lockAmt, 1 * 10 ** 18, 1_000_000_000_000 * 10 ** 18);
+
         // Simulate spell casting
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp, lockstakeEngine)));
@@ -321,7 +355,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
         // Lock tokens
         address lockToken = LockstakeEngineLike(lockstakeEngine).sky();
-        uint256 lockAmt = 2_400_000 * 10 ** 18;
         deal(address(lockToken), owner, lockAmt);
 
         ERC20Like(lockToken).approve(lockstakeEngine, type(uint256).max);
@@ -372,7 +405,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         returns (CheckInitFarmValuesBefore memory v)
     {
         // Sanity checks
-        assertEq(DssVestWithGemLike(p.vest).gem(), sky, "before: gem mismatch");
+        assertEq(DssVestTransferrableLike(p.vest).gem(), sky, "before: gem mismatch");
 
         assertEq(StakingRewardsLike(p.rewards).stakingToken(), p.stakingToken, "before: staking token mismatch");
         assertEq(StakingRewardsLike(p.rewards).rewardsToken(), p.rewardsToken, "before: rewards token mismatch");
@@ -391,8 +424,8 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
         // Initial state
         v.allowance = ERC20Like(p.rewardsToken).allowance(pauseProxy, p.vest);
-        v.cap = DssVestWithGemLike(p.vest).cap();
-        v.vestCount = DssVestWithGemLike(p.vest).ids();
+        v.cap = DssVestTransferrableLike(p.vest).cap();
+        v.vestCount = DssVestTransferrableLike(p.vest).ids();
     }
 
     function _checkFarm_init_afterSpell(FarmingInitParams memory p, CheckInitFarmValuesBefore memory v) internal view {
@@ -418,21 +451,27 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertTrue(VestedRewardsDistributionJobLike(p.distJob).has(p.dist), "after: job should have dist");
 
         assertEq(
-            DssVestWithGemLike(p.vest).ids(), v.vestCount + 1, "after: should have created exactly 1 new vesting stream"
+            DssVestTransferrableLike(p.vest).ids(),
+            v.vestCount + 1,
+            "after: should have created exactly 1 new vesting stream"
         );
         assertEq(
-            DssVestWithGemLike(p.vest).unpaid(v.vestCount + 1), 0, "after: should have distributed any unpaid amount"
+            DssVestTransferrableLike(p.vest).unpaid(v.vestCount + 1),
+            0,
+            "after: should have distributed any unpaid amount"
         );
         // Note: if there was a distribution, the allowance would've been decreased by the paid amount
-        uint256 expectedAllowance = v.allowance + p.vestTot - DssVestWithGemLike(p.vest).rxd(v.vestCount + 1);
+        uint256 expectedAllowance = v.allowance + p.vestTot - DssVestTransferrableLike(p.vest).rxd(v.vestCount + 1);
         assertEq(
             ERC20Like(sky).allowance(pauseProxy, p.vest), expectedAllowance, "after: should set the correct allowance"
         );
 
         // Adds 10% buffer
-        uint256 expectedRateWithBuffer = (11 * p.vestTot) / p.vestTau / 10;
+        uint256 expectedRateWithBuffer = (11 * p.vestTot) / (10 * p.vestTau);
         if (expectedRateWithBuffer > v.cap) {
-            assertEq(DssVestWithGemLike(p.vest).cap(), expectedRateWithBuffer, "after: should set the correct cap");
+            assertEq(
+                DssVestTransferrableLike(p.vest).cap(), expectedRateWithBuffer, "after: should set the correct cap"
+            );
         }
     }
 
@@ -457,12 +496,12 @@ interface ProxyLike {
     function exec(address usr, bytes memory fax) external returns (bytes memory);
 }
 
-interface DssVestWithGemLike {
+interface DssVestTransferrableLike {
     function cap() external view returns (uint256);
     function gem() external view returns (address);
     function ids() external view returns (uint256);
-    function rxd(uint256 vestid) external view returns (uint256);
-    function unpaid(uint256 vestid) external view returns (uint256);
+    function rxd(uint256 vestId) external view returns (uint256);
+    function unpaid(uint256 vestId) external view returns (uint256);
 }
 
 interface StakingRewardsLike {

@@ -35,7 +35,7 @@ contract SkyFarms_LsskySkyFarmingDeployScript is Script {
 
         address admin = chainlog.getAddress("MCD_PAUSE_PROXY");
         address lssky = chainlog.getAddress("LOCKSTAKE_SKY");
-        address sky = chainlog.getAddress("LOCKSTAKE_SKY");
+        address sky = chainlog.getAddress("SKY");
         address vest = chainlog.getAddress("MCD_VEST_SKY_TREASURY");
 
         address dist = reader.readAddressOptional(".dist");
@@ -51,12 +51,7 @@ contract SkyFarms_LsskySkyFarmingDeployScript is Script {
 
         if (dist == address(0)) {
             dist = VestedRewardsDistributionDeploy.deploy(
-                VestedRewardsDistributionDeployParams({
-                    deployer: msg.sender,
-                    owner: admin,
-                    vest: vest,
-                    rewards: rewards
-                })
+                VestedRewardsDistributionDeployParams({deployer: msg.sender, owner: admin, vest: vest, rewards: rewards})
             );
         }
 
