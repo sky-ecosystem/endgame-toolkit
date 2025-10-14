@@ -39,6 +39,9 @@ fs_permissions = [
     { access = "read-write", path = "./script/output/" }
 ]
 
+[lint]
+lint_on_build = false
+
 [rpc_endpoints]
 mainnet = "${ETH_RPC_URL}"
 
