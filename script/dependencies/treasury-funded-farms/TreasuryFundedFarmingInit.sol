@@ -134,6 +134,9 @@ library TreasuryFundedFarmingInit {
 
     function updateFarmVest(FarmingUpdateVestParams memory p) internal returns (FarmingUpdateVestResult memory r) {
         address vest = VestedRewardsDistributionLike(p.dist).dssVest();
+        // Note: `vest` is expected to be of type `DssVestTransferrable`
+        require(DssVestTransferrableLike(vest).czar() == address(this), "initFarm/vest-czar-mismatch");
+
         address rewardsToken = VestedRewardsDistributionLike(p.dist).gem();
         uint256 prevVestId = VestedRewardsDistributionLike(p.dist).vestId();
 
@@ -144,7 +147,6 @@ library TreasuryFundedFarmingInit {
         }
 
         // Get the remaining allawance of the previous vesting stream.
-        // Note: `vest` is expected to be of type `DssVestTransferrable`
         uint256 currAllowance = ERC20Like(rewardsToken).allowance(address(this), vest);
         uint256 prevVestTot = DssVestWithGemLike(vest).tot(r.prevVestId);
         uint256 prevVestRxd = DssVestWithGemLike(vest).rxd(r.prevVestId);
