@@ -125,7 +125,6 @@ interface DssVestTransferrableLike {
     function gem() external view returns (address);
     function file(bytes32 key, uint256 value) external;
     function unpaid(uint256 vestId) external view returns (uint256);
-    function tot(uint256 vestId) external view returns (uint256);
 }
 
 interface StakingRewardsLike {
