@@ -143,13 +143,15 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         _checkFarm_init_afterSpell(fp, v);
     }
 
-    function testFarm_integration_stakeGetRewardAndWithdraw() internal {
+    function testFarm_integration_stakeGetRewardAndWithdraw_Fuzz(uint256 stakeAmt) public {
+        // Bound `stakeAmt` to [1, 1_000_000_000_000]
+        stakeAmt = bound(stakeAmt, 1 * 10 ** 18, 1_000_000_000_000 * 10 ** 18);
+
         // Simulate spell casting
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
 
         // Set `stakingToken` balance of the testing contract.
-        uint256 stakeAmt = 100_000 * 10 ** 18;
         address usr = address(this);
         deal(address(fp.stakingToken), usr, stakeAmt);
 
@@ -326,7 +328,10 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
     }
 
-    function testLockstakeFarm_integration_openSelectFarmLockGetRewardAndFree() public {
+    function testLockstakeFarm_integration_openSelectFarmLockGetRewardAndFree_Fuzz(uint256 lockAmt) public {
+        // Bound lockAmt to [1, 1_000_000_000_000]
+        lockAmt = bound(lockAmt, 1 * 10 ** 18, 1_000_000_000_000 * 10 ** 18);
+
         // Simulate spell casting
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp, lockstakeEngine)));
@@ -350,7 +355,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
         // Lock tokens
         address lockToken = LockstakeEngineLike(lockstakeEngine).sky();
-        uint256 lockAmt = 2_400_000 * 10 ** 18;
         deal(address(lockToken), owner, lockAmt);
 
         ERC20Like(lockToken).approve(lockstakeEngine, type(uint256).max);
