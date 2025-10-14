@@ -80,9 +80,7 @@ contract VestedRewardsDistributionTest is DssTest {
         k.dist.distribute();
 
         assertEq(
-            k.rewardsToken.balanceOf(address(k.rewards)),
-            k.vestParams.tot / 3,
-            "Bad balance after 1st distribution"
+            k.rewardsToken.balanceOf(address(k.rewards)), k.vestParams.tot / 3, "Bad balance after 1st distribution"
         );
 
         // 2nd distribution
@@ -175,7 +173,7 @@ contract VestedRewardsDistributionTest is DssTest {
     }
 
     function testRevertFileVestIdWithCliff() public {
-        (uint256 vestId, ) = _setUpVest(
+        (uint256 vestId,) = _setUpVest(
             k.vest,
             VestParams({usr: address(k.dist), tot: 3_000_000 * WAD, bgn: block.timestamp, tau: 365 days, eta: 30 days})
         );
@@ -185,7 +183,7 @@ contract VestedRewardsDistributionTest is DssTest {
 
     function testRevertFileInvalidUsr() public {
         address usr = address(0x1337);
-        (uint256 newVestId, ) = _setUpVest(k.vest, usr);
+        (uint256 newVestId,) = _setUpVest(k.vest, usr);
 
         vm.expectRevert("VestedRewardsDistribution/invalid-vest-usr");
         k.dist.file("vestId", newVestId);
@@ -193,7 +191,7 @@ contract VestedRewardsDistributionTest is DssTest {
 
     function testRevertFileInvalidRes() public {
         address usr = address(0x1337);
-        (uint256 newVestId, ) = _setUpVest(k.vest, usr, false);
+        (uint256 newVestId,) = _setUpVest(k.vest, usr, false);
 
         vm.expectRevert("VestedRewardsDistribution/invalid-vest-res");
         k.dist.file("vestId", newVestId);
@@ -204,7 +202,7 @@ contract VestedRewardsDistributionTest is DssTest {
     }
 
     function testFile() public {
-        // `checkFileUint` increaments the current value of the param being modified.
+        // `checkFileUint` increments the current value of the param being modified.
         // Since `vestId` is validated, we need to create a new one to make sure the `file`d param is valid.
         // We also don't restrict the `vestId` on purpose to check whether `file` will do it or not.
         _setUpVest(k.vest, k.vestParams);
@@ -301,7 +299,7 @@ contract VestedRewardsDistributionTest is DssTest {
     }
 
     function testRevertWithReasonWhenDistributeBeforeCliffRegression() public {
-        (uint256 vestId2, ) = _setUpVest(
+        (uint256 vestId2,) = _setUpVest(
             k.vest,
             VestParams({
                 usr: address(k.dist),
@@ -318,7 +316,7 @@ contract VestedRewardsDistributionTest is DssTest {
         vm.expectRevert("VestedRewardsDistribution/no-pending-amount");
         k.dist.distribute();
 
-        (uint256 vestId3, ) = _setUpVest(
+        (uint256 vestId3,) = _setUpVest(
             k.vest,
             VestParams({
                 usr: address(k.dist),
@@ -336,9 +334,10 @@ contract VestedRewardsDistributionTest is DssTest {
         k.dist.distribute();
     }
 
-    function _setUpDistributionParams(
-        DistributionParams memory _distParams
-    ) internal returns (DistributionParams memory result) {
+    function _setUpDistributionParams(DistributionParams memory _distParams)
+        internal
+        returns (DistributionParams memory result)
+    {
         result = _distParams;
 
         if (address(result.rewardsToken) == address(0)) {
@@ -346,9 +345,8 @@ contract VestedRewardsDistributionTest is DssTest {
         }
 
         if (address(result.vest) == address(0)) {
-            result.vest = DssVestWithGemLike(
-                deployCode("DssVest.sol:DssVestMintable", abi.encode(address(result.rewardsToken)))
-            );
+            result.vest =
+                DssVestWithGemLike(deployCode("DssVest.sol:DssVestMintable", abi.encode(address(result.rewardsToken))));
             result.vest.file("cap", type(uint256).max);
         }
 
@@ -370,33 +368,31 @@ contract VestedRewardsDistributionTest is DssTest {
         WardsLike(address(result.rewardsToken)).rely(address(result.vest));
     }
 
-    function _setUpVest(
-        DssVestWithGemLike _vest,
-        address _usr
-    ) internal returns (uint256 _vestId, VestParams memory result) {
+    function _setUpVest(DssVestWithGemLike _vest, address _usr)
+        internal
+        returns (uint256 _vestId, VestParams memory result)
+    {
         return _setUpVest(_vest, _usr, true);
     }
 
-    function _setUpVest(
-        DssVestWithGemLike _vest,
-        address _usr,
-        bool restrict
-    ) internal returns (uint256 _vestId, VestParams memory result) {
+    function _setUpVest(DssVestWithGemLike _vest, address _usr, bool restrict)
+        internal
+        returns (uint256 _vestId, VestParams memory result)
+    {
         return _setUpVest(_vest, VestParams({usr: _usr, tot: 0, bgn: 0, tau: 0, eta: 0}), restrict);
     }
 
-    function _setUpVest(
-        DssVestWithGemLike _vest,
-        VestParams memory _v
-    ) internal returns (uint256 _vestId, VestParams memory result) {
+    function _setUpVest(DssVestWithGemLike _vest, VestParams memory _v)
+        internal
+        returns (uint256 _vestId, VestParams memory result)
+    {
         return _setUpVest(_vest, _v, true);
     }
 
-    function _setUpVest(
-        DssVestWithGemLike _vest,
-        VestParams memory _v,
-        bool restrict
-    ) internal returns (uint256 _vestId, VestParams memory result) {
+    function _setUpVest(DssVestWithGemLike _vest, VestParams memory _v, bool restrict)
+        internal
+        returns (uint256 _vestId, VestParams memory result)
+    {
         result = _v;
 
         if (result.usr == address(0)) {

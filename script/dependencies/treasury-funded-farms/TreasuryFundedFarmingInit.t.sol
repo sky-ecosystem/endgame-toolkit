@@ -195,7 +195,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vm.clearMockedCalls();
         }
 
-        // reawards.stakingToken() != fp.stakingToken
+        // rewards.stakingToken() != fp.stakingToken
         {
             vm.mockCall(address(fp.rewards), abi.encodeWithSignature("stakingToken()"), abi.encode(address(0x1337)));
 
@@ -206,7 +206,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vm.clearMockedCalls();
         }
 
-        // reawards.rewardsToken() != fp.rewardsToken
+        // rewards.rewardsToken() != fp.rewardsToken
         {
             vm.mockCall(address(fp.rewards), abi.encodeWithSignature("rewardsToken()"), abi.encode(address(0x1337)));
 
@@ -241,7 +241,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vm.clearMockedCalls();
         }
 
-        // rewards.onwer() != MCD_PAUSE_PROXY
+        // rewards.owner() != MCD_PAUSE_PROXY
         {
             vm.mockCall(address(fp.rewards), abi.encodeWithSignature("owner()"), abi.encode(address(0x1337)));
 
@@ -476,8 +476,8 @@ interface DssVestTransferrableLike {
     function cap() external view returns (uint256);
     function gem() external view returns (address);
     function ids() external view returns (uint256);
-    function rxd(uint256 vestid) external view returns (uint256);
-    function unpaid(uint256 vestid) external view returns (uint256);
+    function rxd(uint256 vestId) external view returns (uint256);
+    function unpaid(uint256 vestId) external view returns (uint256);
 }
 
 interface StakingRewardsLike {
