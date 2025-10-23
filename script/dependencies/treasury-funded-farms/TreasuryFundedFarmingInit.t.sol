@@ -164,14 +164,14 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         uint256 stakedBalance = StakingRewardsLike(fp.rewards).balanceOf(usr);
         assertEq(stakedBalance, pstakedBalance + stakeAmt, "_checkFarm_integration/staked-balance mismatch");
 
-        // Accumulate rewards
+        // Accumulate rewards.
         vm.warp(block.timestamp + 1 days);
 
-        // Check earned rewards
+        // Check earned rewards.
         uint256 earnedAmt = StakingRewardsLike(fp.rewards).earned(usr);
         assertGt(earnedAmt, 0, "_checkFarm_integration/earned-amt mismatch");
 
-        // Claim earned rewards
+        // Claim earned rewards.
         uint256 prewardsTokenBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
         StakingRewardsLike(fp.rewards).getReward();
         uint256 rewardsTokenBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
@@ -181,7 +181,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             "_checkFarm_integration/rewards-token-balance-mismatch"
         );
 
-        // Withdraw staked tokens
+        // Withdraw staked tokens.
         uint256 pstakingTokenBalance = ERC20Like(fp.stakingToken).balanceOf(usr);
         StakingRewardsLike(fp.rewards).withdraw(stakeAmt);
         uint256 stakingTokenBalance = ERC20Like(fp.stakingToken).balanceOf(usr);
