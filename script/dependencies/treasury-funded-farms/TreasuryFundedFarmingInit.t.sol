@@ -116,7 +116,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     }
 
     function testFarm_init() public {
-        CheckInitFarmValuesBefore memory v = _checkFarm_init_beforeSpell(lfp);
+        CheckInitFarmValuesBefore memory v = _checkFarm_init_beforeSpell(fp);
 
         // Simulate spell casting
         vm.prank(pause);
@@ -125,13 +125,33 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         _checkFarm_init_afterSpell(fp, v);
     }
 
-    function testFarm_integration_stakeGetRewardAndwithdraw() internal {
+    function testFarm_init_whenVestingRateIsGreaterThanCurrentVestCap() public {
+        CheckInitFarmValuesBefore memory v;
+
+        // Force `vest.cap()` to return a lower value
+        {
+            vm.mockCall(address(fp.vest), abi.encodeWithSignature("cap()"), abi.encode(uint256(0)));
+
+            v = _checkFarm_init_beforeSpell(fp);
+
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        _checkFarm_init_afterSpell(fp, v);
+    }
+
+    function testFarm_integration_stakeGetRewardAndWithdraw_Fuzz(uint256 stakeAmt) public {
+        // Bound `stakeAmt` to [1, 1_000_000_000_000]
+        stakeAmt = bound(stakeAmt, 1 * 10 ** 18, 1_000_000_000_000 * 10 ** 18);
+
         // Simulate spell casting
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
 
         // Set `stakingToken` balance of the testing contract.
-        uint256 stakeAmt = 100_000 * 10 ** 18;
         address usr = address(this);
         deal(address(fp.stakingToken), usr, stakeAmt);
 
@@ -144,14 +164,14 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         uint256 stakedBalance = StakingRewardsLike(fp.rewards).balanceOf(usr);
         assertEq(stakedBalance, pstakedBalance + stakeAmt, "_checkFarm_integration/staked-balance mismatch");
 
-        // Accumulate rewards
+        // Accumulate rewards.
         vm.warp(block.timestamp + 1 days);
 
-        // Check earned rewards
+        // Check earned rewards.
         uint256 earnedAmt = StakingRewardsLike(fp.rewards).earned(usr);
         assertGt(earnedAmt, 0, "_checkFarm_integration/earned-amt mismatch");
 
-        // Claim earned rewards
+        // Claim earned rewards.
         uint256 prewardsTokenBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
         StakingRewardsLike(fp.rewards).getReward();
         uint256 rewardsTokenBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
@@ -161,7 +181,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             "_checkFarm_integration/rewards-token-balance-mismatch"
         );
 
-        // Withdraw staked tokens
+        // Withdraw staked tokens.
         uint256 pstakingTokenBalance = ERC20Like(fp.stakingToken).balanceOf(usr);
         StakingRewardsLike(fp.rewards).withdraw(stakeAmt);
         uint256 stakingTokenBalance = ERC20Like(fp.stakingToken).balanceOf(usr);
@@ -195,7 +215,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vm.clearMockedCalls();
         }
 
-        // reawards.stakingToken() != fp.stakingToken
+        // rewards.stakingToken() != fp.stakingToken
         {
             vm.mockCall(address(fp.rewards), abi.encodeWithSignature("stakingToken()"), abi.encode(address(0x1337)));
 
@@ -206,7 +226,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vm.clearMockedCalls();
         }
 
-        // reawards.rewardsToken() != fp.rewardsToken
+        // rewards.rewardsToken() != fp.rewardsToken
         {
             vm.mockCall(address(fp.rewards), abi.encodeWithSignature("rewardsToken()"), abi.encode(address(0x1337)));
 
@@ -241,7 +261,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vm.clearMockedCalls();
         }
 
-        // rewards.onwer() != MCD_PAUSE_PROXY
+        // rewards.owner() != MCD_PAUSE_PROXY
         {
             vm.mockCall(address(fp.rewards), abi.encodeWithSignature("owner()"), abi.encode(address(0x1337)));
 
@@ -308,7 +328,10 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
     }
 
-    function testLockstakeFarm_integration_openSelectFarmLockGetRewardAndFree() public {
+    function testLockstakeFarm_integration_openSelectFarmLockGetRewardAndFree_Fuzz(uint256 lockAmt) public {
+        // Bound lockAmt to [1, 1_000_000_000_000]
+        lockAmt = bound(lockAmt, 1 * 10 ** 18, 1_000_000_000_000 * 10 ** 18);
+
         // Simulate spell casting
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp, lockstakeEngine)));
@@ -332,7 +355,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
         // Lock tokens
         address lockToken = LockstakeEngineLike(lockstakeEngine).sky();
-        uint256 lockAmt = 2_400_000 * 10 ** 18;
         deal(address(lockToken), owner, lockAmt);
 
         ERC20Like(lockToken).approve(lockstakeEngine, type(uint256).max);
@@ -445,7 +467,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
 
         // Adds 10% buffer
-        uint256 expectedRateWithBuffer = (11 * p.vestTot) / p.vestTau / 10;
+        uint256 expectedRateWithBuffer = (11 * p.vestTot) / (10 * p.vestTau);
         if (expectedRateWithBuffer > v.cap) {
             assertEq(
                 DssVestTransferrableLike(p.vest).cap(), expectedRateWithBuffer, "after: should set the correct cap"
@@ -476,8 +498,8 @@ interface DssVestTransferrableLike {
     function cap() external view returns (uint256);
     function gem() external view returns (address);
     function ids() external view returns (uint256);
-    function rxd(uint256 vestid) external view returns (uint256);
-    function unpaid(uint256 vestid) external view returns (uint256);
+    function rxd(uint256 vestId) external view returns (uint256);
+    function unpaid(uint256 vestId) external view returns (uint256);
 }
 
 interface StakingRewardsLike {
