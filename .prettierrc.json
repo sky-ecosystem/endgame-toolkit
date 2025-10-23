@@ -1,19 +1,6 @@
 {
   "printWidth": 120,
-  "plugins": ["prettier-plugin-solidity"],
   "overrides": [
-    {
-      "files": ["src/**/*.sol", "script/**/*.sol"],
-      "options": {
-        "compiler": "0.8.19"
-      }
-    },
-    {
-      "files": "src-0_6_x/**/*.sol",
-      "options": {
-        "compiler": "0.6.12"
-      }
-    },
     {
       "files": [
         "*.json"

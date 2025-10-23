@@ -12,6 +12,7 @@ fs_permissions = [
     { access = "read", path = "./script/input/" },
     { access = "read-write", path = "./script/output/" }
 ]
+evm_version = "cancun"
 
 [invariant]
 fail_on_revert = true
@@ -37,6 +38,12 @@ fs_permissions = [
     { access = "read", path = "./script/input/" },
     { access = "read-write", path = "./script/output/" }
 ]
+
+[lint]
+lint_on_build = false
+
+[rpc_endpoints]
+mainnet = "${ETH_RPC_URL}"
 
 [etherscan]
 unknown_chain = { key = "${TENDERLY_ACCESS_KEY}", chain = 314311, url = "${ETH_RPC_URL}/verify/etherscan" }
