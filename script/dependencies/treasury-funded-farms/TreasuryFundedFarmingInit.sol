@@ -131,8 +131,7 @@ library TreasuryFundedFarmingInit {
         // Note: `vest` is expected to be of type `DssVestTransferrable`
         require(vest.czar() == address(this), "initFarm/vest-czar-mismatch");
 
-        address rewardsToken = dist.gem();
-        ERC20Like rewardsTokenContract = ERC20Like(rewardsToken);
+        ERC20Like rewardsToken = ERC20Like(dist.gem());
         uint256 prevVestId = dist.vestId();
 
         // Check if there is a distribution to be done in the previous vesting stream.
@@ -141,13 +140,13 @@ library TreasuryFundedFarmingInit {
             dist.distribute();
         }
 
-        // Get the remaining allawance of the previous vesting stream.
-        uint256 currAllowance = rewardsTokenContract.allowance(address(this), address(vest));
+        // Get the remaining allowance of the previous vesting stream.
+        uint256 currAllowance = rewardsToken.allowance(address(this), address(vest));
         uint256 prevVestTot = vest.tot(prevVestId);
         uint256 prevVestRxd = vest.rxd(prevVestId);
 
         // Adjust the allowance considering the previous vest unclaimed amount and the new vest total.
-        rewardsTokenContract.approve(address(vest), currAllowance + p.vestTot - (prevVestTot - prevVestRxd));
+        rewardsToken.approve(address(vest), currAllowance + p.vestTot - (prevVestTot - prevVestRxd));
 
         // Yank the previous vesting stream.
         vest.yank(prevVestId);
