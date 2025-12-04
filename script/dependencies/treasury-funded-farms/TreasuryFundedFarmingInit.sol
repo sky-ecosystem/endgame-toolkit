@@ -126,10 +126,16 @@ library TreasuryFundedFarmingInit {
     }
 
     function updateFarmVest(FarmingUpdateVestParams memory p) internal returns (FarmingUpdateVestResult memory r) {
+        require(p.vestTot > 0, "updateFarmVest/vest-tot-zero");
+        require(p.vestTau > 0, "updateFarmVest/vest-tau-zero");
+
         VestedRewardsDistributionLike dist = VestedRewardsDistributionLike(p.dist);
+        require(dist.vestId() != 0, "updateFarmVest/dist-vest-id-not-set");
+
         DssVestTransferrableLike vest = DssVestTransferrableLike(dist.dssVest());
         // Note: `vest` is expected to be of type `DssVestTransferrable`
-        require(vest.czar() == address(this), "initFarm/vest-czar-mismatch");
+        require(vest.czar() == address(this), "updateFarmVest/vest-czar-mismatch");
+        require(vest.gem() == dist.gem(), "updateFarmVest/vest-gem-mismatch");
 
         ERC20Like rewardsToken = ERC20Like(dist.gem());
         uint256 prevVestId = dist.vestId();

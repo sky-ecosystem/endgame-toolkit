@@ -584,6 +584,97 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertGt(postBalance, preBalance, "Should receive rewards after update");
     }
 
+    function testRevert_updateVest_whenVestCzarMismatch() public {
+        // Initialize farm first
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+        // Mock vest.czar() to return wrong address
+        address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
+        vm.mockCall(address(vestAddr), abi.encodeWithSignature("czar()"), abi.encode(address(0x1337)));
+
+        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
+            dist: fp.dist, vestTot: 1_200_000 * 10 ** 18, vestBgn: block.timestamp + 1 days, vestTau: 90 days
+        });
+
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+
+        vm.clearMockedCalls();
+    }
+
+    function testRevert_updateVest_whenInvalidParams() public {
+        // Initialize farm first
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+        // Test vestTot = 0
+        {
+            FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
+                dist: fp.dist,
+                vestTot: 0, // Invalid
+                vestBgn: block.timestamp + 1 days,
+                vestTau: 90 days
+            });
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+        }
+
+        // Test vestTau = 0 (division by zero risk)
+        {
+            FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
+                dist: fp.dist,
+                vestTot: 1_200_000 * 10 ** 18,
+                vestBgn: block.timestamp + 1 days,
+                vestTau: 0 // Invalid - would cause division by zero
+            });
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+        }
+
+        // Test dist with vestId = 0 (not initialized)
+        {
+            // Deploy a new distribution that hasn't been initialized
+            address uninitDist = VestedRewardsDistributionDeploy.deploy(
+                VestedRewardsDistributionDeployParams({
+                    deployer: address(this), owner: pauseProxy, vest: fp.vest, rewards: fp.rewards
+                })
+            );
+
+            FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
+                dist: uninitDist, // This dist has vestId = 0
+                vestTot: 1_200_000 * 10 ** 18,
+                vestBgn: block.timestamp + 1 days,
+                vestTau: 90 days
+            });
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+        }
+
+        // Test vest gem mismatch
+        {
+            address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
+            vm.mockCall(address(vestAddr), abi.encodeWithSignature("gem()"), abi.encode(address(0x1337)));
+
+            FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
+                dist: fp.dist, vestTot: 1_200_000 * 10 ** 18, vestBgn: block.timestamp + 1 days, vestTau: 90 days
+            });
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+
+            vm.clearMockedCalls();
+        }
+    }
+
     function _checkFarm_updateVest_beforeSpell(FarmingUpdateVestParams memory p)
         internal
         view
@@ -640,8 +731,10 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         // Note: The reward rate in StakingRewards is updated during distribution, not immediately
         // We verify that the new vesting parameters are in place, which will affect future distributions
         uint256 currentRewardRate = StakingRewardsLike(stakingRewards).rewardRate();
-        // The reward rate should be positive (farming is active)
-        assertGt(currentRewardRate, 0, "after: reward rate should be positive");
+        // The reward rate should be positive only if there was a distribution
+        if (result.distributedAmount > 0) {
+            assertGt(currentRewardRate, 0, "after: reward rate should be positive when distribution occurred");
+        }
 
         // Verify distributions occurred if there was unpaid amount
         if (p.vestBgn < block.timestamp) {
