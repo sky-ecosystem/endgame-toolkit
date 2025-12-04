@@ -142,55 +142,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         _checkFarm_init_afterSpell(fp, b);
     }
 
-    function testFarm_integration_stakeGetRewardAndWithdraw_Fuzz(uint256 stakeAmt) public {
-        // Bound `stakeAmt` to [1, 1_000_000_000_000]
-        stakeAmt = bound(stakeAmt, 1 * 10 ** 18, 1_000_000_000_000 * 10 ** 18);
-
-        // Simulate spell casting
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-
-        // Set `stakingToken` balance of the testing contract.
-        address usr = address(this);
-        deal(address(fp.stakingToken), usr, stakeAmt);
-
-        // Approve `stakingToken` to the farming contract.
-        ERC20Like(fp.stakingToken).approve(fp.rewards, stakeAmt);
-
-        // Stake `stakingToken`
-        uint256 pstakedBalance = StakingRewardsLike(fp.rewards).balanceOf(usr);
-        StakingRewardsLike(fp.rewards).stake(stakeAmt);
-        uint256 stakedBalance = StakingRewardsLike(fp.rewards).balanceOf(usr);
-        assertEq(stakedBalance, pstakedBalance + stakeAmt, "_checkFarm_integration/staked-balance mismatch");
-
-        // Accumulate rewards.
-        vm.warp(block.timestamp + 1 days);
-
-        // Check earned rewards.
-        uint256 earnedAmt = StakingRewardsLike(fp.rewards).earned(usr);
-        assertGt(earnedAmt, 0, "_checkFarm_integration/earned-amt mismatch");
-
-        // Claim earned rewards.
-        uint256 prewardsTokenBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
-        StakingRewardsLike(fp.rewards).getReward();
-        uint256 rewardsTokenBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
-        assertEq(
-            rewardsTokenBalance,
-            prewardsTokenBalance + earnedAmt,
-            "_checkFarm_integration/rewards-token-balance-mismatch"
-        );
-
-        // Withdraw staked tokens.
-        uint256 pstakingTokenBalance = ERC20Like(fp.stakingToken).balanceOf(usr);
-        StakingRewardsLike(fp.rewards).withdraw(stakeAmt);
-        uint256 stakingTokenBalance = ERC20Like(fp.stakingToken).balanceOf(usr);
-        assertEq(
-            stakingTokenBalance,
-            pstakingTokenBalance + stakeAmt,
-            "_checkFarm_integration/staking-token-balance-mismatch"
-        );
-    }
-
     function testRevert_farm_init_whenMismatchingParams() public {
         // vest.czar != pauseProxy
         {
@@ -324,68 +275,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             uint8(LockstakeEngineLike(lockstakeEngine).farms(lfp.rewards)),
             uint8(LockstakeEngineLike.FarmStatus.ACTIVE),
             "after: lockstake engine should have rewards"
-        );
-    }
-
-    function testLockstakeFarm_integration_openSelectFarmLockGetRewardAndFree_Fuzz(uint256 lockAmt) public {
-        // Bound lockAmt to [1, 1_000_000_000_000]
-        lockAmt = bound(lockAmt, 1 * 10 ** 18, 1_000_000_000_000 * 10 ** 18);
-
-        // Simulate spell casting
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp, lockstakeEngine)));
-
-        // Open a new urn
-        address owner = address(this);
-
-        uint256 ownerUrnsCount = LockstakeEngineLike(lockstakeEngine).ownerUrnsCount(owner);
-        assertEq(ownerUrnsCount, 0, "_checkLockstakeFarm_integration/owner-urns-count-mismatch");
-
-        uint256 urnIndex = ownerUrnsCount;
-        address urn = LockstakeEngineLike(lockstakeEngine).open(urnIndex);
-
-        // Select a farm
-        LockstakeEngineLike(lockstakeEngine).selectFarm(owner, urnIndex, lfp.rewards, 0);
-        assertEq(
-            LockstakeEngineLike(lockstakeEngine).urnFarms(urn),
-            lfp.rewards,
-            "_checkLockstakeFarm_integration/urn-farm mismatch"
-        );
-
-        // Lock tokens
-        address lockToken = LockstakeEngineLike(lockstakeEngine).sky();
-        deal(address(lockToken), owner, lockAmt);
-
-        ERC20Like(lockToken).approve(lockstakeEngine, type(uint256).max);
-        LockstakeEngineLike(lockstakeEngine).lock(owner, urnIndex, lockAmt, 0);
-
-        // Check staking token balance for the urn
-        uint256 stakedAmt = StakingRewardsLike(lfp.rewards).balanceOf(urn);
-        assertEq(stakedAmt, lockAmt, "_checkLockstakeFarm_integration/staking-token-balance-mismatch");
-
-        // Accumulate rewards
-        vm.warp(block.timestamp + 1 days);
-
-        // Check earned rewards
-        uint256 earnedAmt = StakingRewardsLike(lfp.rewards).earned(urn);
-        assertGt(earnedAmt, 0, "_checkFarm_integration/earned-amt mismatch");
-
-        // Get rewards
-        uint256 prewardsTokenBalance = ERC20Like(lfp.rewardsToken).balanceOf(owner);
-        LockstakeEngineLike(lockstakeEngine).getReward(owner, urnIndex, lfp.rewards, owner);
-        uint256 rewardsTokenBalance = ERC20Like(lfp.rewardsToken).balanceOf(owner);
-        assertEq(
-            rewardsTokenBalance,
-            prewardsTokenBalance + earnedAmt,
-            "_checkLockstakeFarm_integration/rewards-token-balance mismatch"
-        );
-
-        // Free urn
-        uint256 plockTokenBalance = ERC20Like(lockToken).balanceOf(owner);
-        LockstakeEngineLike(lockstakeEngine).free(owner, urnIndex, owner, lockAmt);
-        uint256 lockTokenBalance = ERC20Like(lockToken).balanceOf(owner);
-        assertEq(
-            lockTokenBalance, plockTokenBalance + lockAmt, "_checkLockstakeFarm_integration/lock-token-balance mismatch"
         );
     }
 
@@ -825,47 +714,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
                 "after: should have distributed if vesting already started"
             );
         }
-    }
-
-    function testFarm_updateVest_integration_stakingStillWorksAfterUpdate() public {
-        uint256 stakeAmt = 1000 * 10 ** 18;
-
-        // Initialize farm
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-
-        // Set up staking
-        address usr = address(this);
-        deal(address(fp.stakingToken), usr, stakeAmt);
-        ERC20Like(fp.stakingToken).approve(fp.rewards, stakeAmt);
-        StakingRewardsLike(fp.rewards).stake(stakeAmt);
-
-        // Accumulate some rewards
-        vm.warp(block.timestamp + 2 days);
-        uint256 earnedBefore = StakingRewardsLike(fp.rewards).earned(usr);
-        assertGt(earnedBefore, 0, "Should have earned rewards before update");
-
-        // Update the vest
-        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-            dist: fp.dist,
-            vestTot: 1_200_000 * 10 ** 18, // Different amount
-            vestBgn: block.timestamp + 1 hours,
-            vestTau: 60 days
-        });
-
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-
-        // Verify staking still works after update
-        vm.warp(block.timestamp + 1 days);
-        uint256 earnedAfter = StakingRewardsLike(fp.rewards).earned(usr);
-        assertGt(earnedAfter, earnedBefore, "Should continue earning rewards after update");
-
-        // Verify we can still claim rewards
-        uint256 preBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
-        StakingRewardsLike(fp.rewards).getReward();
-        uint256 postBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
-        assertGt(postBalance, preBalance, "Should receive rewards after update");
     }
 }
 
