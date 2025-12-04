@@ -543,47 +543,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertGt(result.distributedAmount, 0, "Should have distributed new unpaid amount");
     }
 
-    function testFarm_updateVest_integration_stakingStillWorksAfterUpdate() public {
-        uint256 stakeAmt = 1000 * 10 ** 18;
-
-        // Initialize farm
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-
-        // Set up staking
-        address usr = address(this);
-        deal(address(fp.stakingToken), usr, stakeAmt);
-        ERC20Like(fp.stakingToken).approve(fp.rewards, stakeAmt);
-        StakingRewardsLike(fp.rewards).stake(stakeAmt);
-
-        // Accumulate some rewards
-        vm.warp(block.timestamp + 2 days);
-        uint256 earnedBefore = StakingRewardsLike(fp.rewards).earned(usr);
-        assertGt(earnedBefore, 0, "Should have earned rewards before update");
-
-        // Update the vest
-        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-            dist: fp.dist,
-            vestTot: 1_200_000 * 10 ** 18, // Different amount
-            vestBgn: block.timestamp + 1 hours,
-            vestTau: 60 days
-        });
-
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-
-        // Verify staking still works after update
-        vm.warp(block.timestamp + 1 days);
-        uint256 earnedAfter = StakingRewardsLike(fp.rewards).earned(usr);
-        assertGt(earnedAfter, earnedBefore, "Should continue earning rewards after update");
-
-        // Verify we can still claim rewards
-        uint256 preBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
-        StakingRewardsLike(fp.rewards).getReward();
-        uint256 postBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
-        assertGt(postBalance, preBalance, "Should receive rewards after update");
-    }
-
     function testFarm_updateVest_whenCapNeedsAdjustment() public {
         // Initialize farm
         vm.prank(pause);
@@ -667,7 +626,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         uint256 prevVestRxdAfterDist = DssVestTransferrableLike(vestAddr).rxd(prevVestId);
 
         // Record allowance after the distribution to get accurate baseline
-        uint256 currAllowanceAfterDist = ERC20Like(rewardsToken).allowance(pauseProxy, vestAddr);
+        uint256 prevAllowanceAfterDist = ERC20Like(rewardsToken).allowance(pauseProxy, vestAddr);
 
         // Update vest
         vm.prank(pause);
@@ -676,7 +635,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         // Check that allowance was correctly calculated
         uint256 currAllowanceAfter = ERC20Like(rewardsToken).allowance(pauseProxy, vestAddr);
         uint256 expectedChange = updateParams.vestTot - (prevVestTot - prevVestRxdAfterDist);
-        uint256 expectedAllowance = currAllowanceAfterDist + expectedChange;
+        uint256 expectedAllowance = prevAllowanceAfterDist + expectedChange;
 
         // Use 1% tolerance for allowance calculation verification
         assertApproxEqRel(
@@ -713,6 +672,14 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         uint256 newVestId = result.vestId;
         assertEq(newVestId, vestCountBefore + 1, "Should create exactly one new vest");
         assertEq(DssVestTransferrableLike(vestAddr).tot(newVestId), customVestTot, "New vest should have correct total");
+        assertEq(
+            DssVestTransferrableLike(vestAddr).bgn(newVestId), customVestBgn, "New vest should have correct begin time"
+        );
+        assertEq(
+            DssVestTransferrableLike(vestAddr).fin(newVestId),
+            customVestBgn + customVestTau,
+            "New vest should have correct finish time"
+        );
 
         // Verify the vest is properly linked to distribution
         assertEq(VestedRewardsDistributionLike(fp.dist).vestId(), newVestId, "Distribution should point to new vest");
@@ -813,7 +780,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         FarmingUpdateVestParams memory p,
         CheckUpdateFarmVestValuesBefore memory b,
         FarmingUpdateVestResult memory result
-    ) internal {
+    ) internal view {
         address vestAddr = VestedRewardsDistributionLike(p.dist).dssVest();
         address rewardsToken = VestedRewardsDistributionLike(p.dist).gem();
         address stakingRewards = VestedRewardsDistributionLike(p.dist).stakingRewards();
@@ -859,6 +826,47 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             );
         }
     }
+
+    function testFarm_updateVest_integration_stakingStillWorksAfterUpdate() public {
+        uint256 stakeAmt = 1000 * 10 ** 18;
+
+        // Initialize farm
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+        // Set up staking
+        address usr = address(this);
+        deal(address(fp.stakingToken), usr, stakeAmt);
+        ERC20Like(fp.stakingToken).approve(fp.rewards, stakeAmt);
+        StakingRewardsLike(fp.rewards).stake(stakeAmt);
+
+        // Accumulate some rewards
+        vm.warp(block.timestamp + 2 days);
+        uint256 earnedBefore = StakingRewardsLike(fp.rewards).earned(usr);
+        assertGt(earnedBefore, 0, "Should have earned rewards before update");
+
+        // Update the vest
+        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
+            dist: fp.dist,
+            vestTot: 1_200_000 * 10 ** 18, // Different amount
+            vestBgn: block.timestamp + 1 hours,
+            vestTau: 60 days
+        });
+
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+
+        // Verify staking still works after update
+        vm.warp(block.timestamp + 1 days);
+        uint256 earnedAfter = StakingRewardsLike(fp.rewards).earned(usr);
+        assertGt(earnedAfter, earnedBefore, "Should continue earning rewards after update");
+
+        // Verify we can still claim rewards
+        uint256 preBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
+        StakingRewardsLike(fp.rewards).getReward();
+        uint256 postBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
+        assertGt(postBalance, preBalance, "Should receive rewards after update");
+    }
 }
 
 contract MockSpell {
@@ -887,6 +895,8 @@ interface DssVestTransferrableLike {
     function cap() external view returns (uint256);
     function gem() external view returns (address);
     function ids() external view returns (uint256);
+    function bgn(uint256 vestId) external view returns (uint256);
+    function fin(uint256 vestId) external view returns (uint256);
     function rxd(uint256 vestId) external view returns (uint256);
     function tot(uint256 vestId) external view returns (uint256);
     function unpaid(uint256 vestId) external view returns (uint256);
