@@ -127,14 +127,14 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         uint256 pstakedBalance = StakingRewardsLike(fp.rewards).balanceOf(usr);
         StakingRewardsLike(fp.rewards).stake(stakeAmt);
         uint256 stakedBalance = StakingRewardsLike(fp.rewards).balanceOf(usr);
-        assertEq(stakedBalance, pstakedBalance + stakeAmt, "_checkFarm_integration/staked-balance mismatch");
+        assertEq(stakedBalance, pstakedBalance + stakeAmt, "Staking failed: balance should increase by staked amount");
 
         // Accumulate rewards.
         vm.warp(block.timestamp + 1 days);
 
         // Check earned rewards.
         uint256 earnedAmt = StakingRewardsLike(fp.rewards).earned(usr);
-        assertGt(earnedAmt, 0, "_checkFarm_integration/earned-amt mismatch");
+        assertGt(earnedAmt, 0, "No rewards earned after 1 day of staking");
 
         // Claim earned rewards.
         uint256 prewardsTokenBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
@@ -143,7 +143,7 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         assertEq(
             rewardsTokenBalance,
             prewardsTokenBalance + earnedAmt,
-            "_checkFarm_integration/rewards-token-balance-mismatch"
+            "Reward claiming failed: balance should increase by earned amount"
         );
 
         // Withdraw staked tokens.
@@ -153,7 +153,7 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         assertEq(
             stakingTokenBalance,
             pstakingTokenBalance + stakeAmt,
-            "_checkFarm_integration/staking-token-balance-mismatch"
+            "Withdrawal failed: balance should increase by withdrawn amount"
         );
     }
 
@@ -169,7 +169,7 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         address owner = address(this);
 
         uint256 ownerUrnsCount = LockstakeEngineLike(lockstakeEngine).ownerUrnsCount(owner);
-        assertEq(ownerUrnsCount, 0, "_checkLockstakeFarm_integration/owner-urns-count-mismatch");
+        assertEq(ownerUrnsCount, 0, "Owner should start with zero urns");
 
         uint256 urnIndex = ownerUrnsCount;
         address urn = LockstakeEngineLike(lockstakeEngine).open(urnIndex);
@@ -179,7 +179,7 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         assertEq(
             LockstakeEngineLike(lockstakeEngine).urnFarms(urn),
             lfp.rewards,
-            "_checkLockstakeFarm_integration/urn-farm mismatch"
+            "Farm selection failed: urn should be associated with rewards contract"
         );
 
         // Lock tokens
@@ -191,14 +191,14 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
 
         // Check staking token balance for the urn
         uint256 stakedAmt = StakingRewardsLike(lfp.rewards).balanceOf(urn);
-        assertEq(stakedAmt, lockAmt, "_checkLockstakeFarm_integration/staking-token-balance-mismatch");
+        assertEq(stakedAmt, lockAmt, "Lockstake failed: urn staked balance should equal locked amount");
 
         // Accumulate rewards
         vm.warp(block.timestamp + 1 days);
 
         // Check earned rewards
         uint256 earnedAmt = StakingRewardsLike(lfp.rewards).earned(urn);
-        assertGt(earnedAmt, 0, "_checkFarm_integration/earned-amt mismatch");
+        assertGt(earnedAmt, 0, "No rewards earned after 1 day of lockstaking");
 
         // Get rewards
         uint256 prewardsTokenBalance = ERC20Like(lfp.rewardsToken).balanceOf(owner);
@@ -207,7 +207,7 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         assertEq(
             rewardsTokenBalance,
             prewardsTokenBalance + earnedAmt,
-            "_checkLockstakeFarm_integration/rewards-token-balance mismatch"
+            "Lockstake reward claiming failed: balance should increase by earned amount"
         );
 
         // Free urn
@@ -215,7 +215,9 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         LockstakeEngineLike(lockstakeEngine).free(owner, urnIndex, owner, lockAmt);
         uint256 lockTokenBalance = ERC20Like(lockToken).balanceOf(owner);
         assertEq(
-            lockTokenBalance, plockTokenBalance + lockAmt, "_checkLockstakeFarm_integration/lock-token-balance mismatch"
+            lockTokenBalance,
+            plockTokenBalance + lockAmt,
+            "Free operation failed: balance should increase by freed amount"
         );
     }
 
@@ -235,7 +237,7 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         // Accumulate some rewards
         vm.warp(block.timestamp + 2 days);
         uint256 earnedBefore = StakingRewardsLike(fp.rewards).earned(usr);
-        assertGt(earnedBefore, 0, "Should have earned rewards before update");
+        assertGt(earnedBefore, 0, "No rewards earned after 2 days before vest update");
 
         // Update the vest
         FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
@@ -251,13 +253,13 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         // Verify staking still works after update
         vm.warp(block.timestamp + 1 days);
         uint256 earnedAfter = StakingRewardsLike(fp.rewards).earned(usr);
-        assertGt(earnedAfter, earnedBefore, "Should continue earning rewards after update");
+        assertGt(earnedAfter, earnedBefore, "Rewards should continue accumulating after vest update");
 
         // Verify we can still claim rewards
         uint256 preBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
         StakingRewardsLike(fp.rewards).getReward();
         uint256 postBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
-        assertGt(postBalance, preBalance, "Should receive rewards after update");
+        assertGt(postBalance, preBalance, "Reward claiming should work after vest update");
     }
 }
 
