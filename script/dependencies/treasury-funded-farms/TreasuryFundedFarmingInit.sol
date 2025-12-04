@@ -75,7 +75,7 @@ library TreasuryFundedFarmingInit {
         require(dist.vestId() == 0, "initFarm/dist-vest-id-already-set");
         require(dist.stakingRewards() == p.rewards, "initFarm/dist-staking-rewards-mismatch");
 
-        // Set `dist` with  `rewardsDistribution` role in `rewards`.
+        // Set `dist` with `rewardsDistribution` role in `rewards`.
         StakingRewardsInit.init(p.rewards, StakingRewardsInitParams({dist: p.dist}));
 
         ERC20Like rewardsToken = ERC20Like(p.rewardsToken);
