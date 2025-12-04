@@ -146,16 +146,25 @@ library TreasuryFundedFarmingInit {
             dist.distribute();
         }
 
-        // Get the remaining allowance of the previous vesting stream.
-        uint256 currAllowance = rewardsToken.allowance(address(this), address(vest));
-        uint256 prevVestTot = vest.tot(prevVestId);
-        uint256 prevVestRxd = vest.rxd(prevVestId);
-
-        // Adjust the allowance considering the previous vest unclaimed amount and the new vest total.
-        rewardsToken.approve(address(vest), currAllowance + p.vestTot - (prevVestTot - prevVestRxd));
+        // Adjust allowance for the new vest
+        {
+            uint256 currAllowance = rewardsToken.allowance(address(this), address(vest));
+            uint256 prevVestTot = vest.tot(prevVestId);
+            uint256 prevVestRxd = vest.rxd(prevVestId);
+            rewardsToken.approve(address(vest), currAllowance + p.vestTot - (prevVestTot - prevVestRxd));
+        }
 
         // Yank the previous vesting stream.
         vest.yank(prevVestId);
+
+        // Check if vest cap needs adjustment
+        {
+            uint256 cap = vest.cap();
+            uint256 rateWithBuffer = (110 * p.vestTot) / (100 * p.vestTau);
+            if (rateWithBuffer > cap) {
+                vest.file("cap", rateWithBuffer);
+            }
+        }
 
         // Create a new vesting stream for rewards distribution.
         uint256 vestId = VestInit.create(

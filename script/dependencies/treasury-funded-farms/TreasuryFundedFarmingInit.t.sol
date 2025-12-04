@@ -584,6 +584,42 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertGt(postBalance, preBalance, "Should receive rewards after update");
     }
 
+    function testFarm_updateVest_whenCapNeedsAdjustment() public {
+        // Initialize farm
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+        // Record original cap and mock low cap to force adjustment
+        address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
+        uint256 originalCap = DssVestTransferrableLike(vestAddr).cap();
+        vm.mockCall(address(vestAddr), abi.encodeWithSignature("cap()"), abi.encode(uint256(1)));
+
+        // Create update params with high rate requiring cap adjustment
+        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
+            dist: fp.dist,
+            vestTot: 100_000_000 * 10 ** 18, // Very high amount to force cap adjustment
+            vestBgn: block.timestamp + 1 days,
+            vestTau: 1 days // Very short period = very high rate
+        });
+
+        uint256 expectedRateWithBuffer = (110 * updateParams.vestTot) / (100 * updateParams.vestTau);
+
+        // Simulate spell casting for update
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+
+        vm.clearMockedCalls();
+
+        // Verify the vest was created successfully
+        uint256 newVestId = VestedRewardsDistributionLike(fp.dist).vestId();
+        assertGt(newVestId, 0, "New vest should be created");
+
+        // Verify the cap was adjusted to the expected rate with buffer
+        uint256 newCap = DssVestTransferrableLike(vestAddr).cap();
+        assertEq(newCap, expectedRateWithBuffer, "Cap should be adjusted to expected rate with buffer");
+        assertGt(newCap, originalCap, "New cap should be greater than original cap");
+    }
+
     function testRevert_updateVest_whenVestCzarMismatch() public {
         // Initialize farm first
         vm.prank(pause);
@@ -602,6 +638,84 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
 
         vm.clearMockedCalls();
+    }
+
+    function testFarm_updateVest_allowanceCalculation() public {
+        // Initialize farm
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+        // Fast forward to create some received amount
+        vm.warp(block.timestamp + 30 days);
+
+        address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
+        address rewardsToken = VestedRewardsDistributionLike(fp.dist).gem();
+        uint256 prevVestId = VestedRewardsDistributionLike(fp.dist).vestId();
+
+        // Record state before update
+        uint256 prevVestTot = DssVestTransferrableLike(vestAddr).tot(prevVestId);
+
+        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
+            dist: fp.dist,
+            vestTot: 3_000_000 * 10 ** 18, // Different amount to test allowance calculation
+            vestBgn: block.timestamp + 1 days,
+            vestTau: 200 days
+        });
+
+        // Force some distribution to happen before update
+        VestedRewardsDistributionLike(fp.dist).distribute();
+        uint256 prevVestRxdAfterDist = DssVestTransferrableLike(vestAddr).rxd(prevVestId);
+
+        // Record allowance after the distribution to get accurate baseline
+        uint256 currAllowanceAfterDist = ERC20Like(rewardsToken).allowance(pauseProxy, vestAddr);
+
+        // Update vest
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+
+        // Check that allowance was correctly calculated
+        uint256 currAllowanceAfter = ERC20Like(rewardsToken).allowance(pauseProxy, vestAddr);
+        uint256 expectedChange = updateParams.vestTot - (prevVestTot - prevVestRxdAfterDist);
+        uint256 expectedAllowance = currAllowanceAfterDist + expectedChange;
+
+        // Use 1% tolerance for allowance calculation verification
+        assertApproxEqRel(
+            currAllowanceAfter,
+            expectedAllowance,
+            1e16, // 1% tolerance (1e18 = 100%)
+            "Allowance calculation should be approximately correct"
+        );
+    }
+
+    function testFarm_updateVest_vestCreationParameters() public {
+        // Initialize farm
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+        uint256 customVestTot = 5_000_000 * 10 ** 18;
+        uint256 customVestBgn = block.timestamp + 7 days;
+        uint256 customVestTau = 45 days;
+
+        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
+            dist: fp.dist, vestTot: customVestTot, vestBgn: customVestBgn, vestTau: customVestTau
+        });
+
+        address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
+        uint256 vestCountBefore = DssVestTransferrableLike(vestAddr).ids();
+
+        // Update vest
+        vm.prank(pause);
+        bytes memory returnData =
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+        FarmingUpdateVestResult memory result = abi.decode(returnData, (FarmingUpdateVestResult));
+
+        // Verify new vest has correct parameters
+        uint256 newVestId = result.vestId;
+        assertEq(newVestId, vestCountBefore + 1, "Should create exactly one new vest");
+        assertEq(DssVestTransferrableLike(vestAddr).tot(newVestId), customVestTot, "New vest should have correct total");
+
+        // Verify the vest is properly linked to distribution
+        assertEq(VestedRewardsDistributionLike(fp.dist).vestId(), newVestId, "Distribution should point to new vest");
     }
 
     function testRevert_updateVest_whenInvalidParams() public {
