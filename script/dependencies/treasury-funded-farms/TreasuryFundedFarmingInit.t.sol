@@ -84,9 +84,9 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             stakingToken: usds,
             rewardsToken: sky,
             rewards: address(0),
-            rewardsKey: "REWARDS_LSSKY_SKY",
+            rewardsKey: "REWARDS_USDS_SKY",
             dist: address(0),
-            distKey: "REWARDS_DIST_LSSKY_SKY",
+            distKey: "REWARDS_DIST_USDS_SKY",
             distJob: distJob,
             distJobInterval: 7 days - 1 hours,
             vest: vest,
@@ -337,6 +337,9 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         }
 
         assertTrue(VestedRewardsDistributionJobLike(p.distJob).has(p.dist), "after: job should have dist");
+
+        assertEq(chainlog.getAddress(p.rewardsKey), p.rewards, "after: should set rewards chainlog entry");
+        assertEq(chainlog.getAddress(p.distKey), p.dist, "after: should set dist chainlog entry");
 
         assertEq(
             DssVestTransferrableLike(p.vest).ids(),
