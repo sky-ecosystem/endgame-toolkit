@@ -1,0 +1,6 @@
+{
+  "grove": "address: the address of GROVE",
+  "vest": "address: the address of a DssVestTransferrable contract for GROVE",
+  "rewards": "[OPTIONAL] address: the address of the StakingRewards contract",
+  "dist": "[OPTIONAL] address: the address of the VestedRewardsDistrubution contract"
+}
