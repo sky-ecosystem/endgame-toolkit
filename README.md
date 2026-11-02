@@ -120,3 +120,17 @@ forge test -vvv
 [dss-vest]: https://github.com/makerdao/dss-vest/blob/19a9d663bb3a2737f1f0c763365f1dfc6788aad2/src/DssVest.sol#L223-L225
 [ds-pause-proxy]: https://github.com/makerdao/ds-pause/blob/5e798dd96bfaac978cd9fe3c0259b486e8afd213/src/pause.sol#L139-L154
 [staking-rewards]: https://github.com/Synthetixio/synthetix/blob/098b7f58a65fab5c2608d1d7e9c8bd56fdcc50d3/contracts/StakingRewards.sol
+
+## Audits
+
+Audit reports are hosted on the auditors' public portfolio pages:
+
+| Auditor | Report | Date |
+| --- | --- | --- |
+| ChainSecurity | [Sky Endgame Toolkit](https://www.chainsecurity.com/security-audit/maker-endgame-toolkit/) | 2026-01-16 |
+| Cantina | [Sky: Endgame Toolkit](https://cantina.xyz/portfolio/5c4e6fc9-91db-41dc-860e-101d093bce47) | 2025-11-28 |
+| Cantina | [sdao](https://cantina.xyz/portfolio/9543ae20-3e91-42d3-86f2-b40a480f1bb6) | 2024-09-17 |
+| Cantina | [endgame-toolkit (updates)](https://cantina.xyz/portfolio/24a166ef-0910-4d89-b4f9-8932632f6b98) | 2024-09-02 |
+| Cantina | [endgametoolkit](https://cantina.xyz/portfolio/b6a73f6e-046f-41de-81ee-ac29b2791bbd) | 2023-09-25 |
+
+ChainSecurity reports are cumulative: each portfolio page hosts the latest version of the report, which covers all previously reviewed versions.
