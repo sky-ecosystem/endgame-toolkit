@@ -94,7 +94,7 @@ After cloning the repo, run:
 # 1. Install solhint, prettier, husky and other tools
 yarn install
 # 2. Install Foundry dependencies
-forge update
+git submodule update --init --recursive
 ```
 
 ### Build

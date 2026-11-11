@@ -15,18 +15,13 @@
 
 pragma solidity ^0.8.16;
 
-import {DssTest} from "dss-test/DssTest.sol";
+import {DssTest, AuthLike} from "dss-test/DssTest.sol";
 import {StakingRewardsDeploy, StakingRewardsDeployParams} from "../StakingRewardsDeploy.sol";
 import {
     VestedRewardsDistributionDeploy,
     VestedRewardsDistributionDeployParams
 } from "../VestedRewardsDistributionDeploy.sol";
-import {
-    TreasuryFundedFarmingInit,
-    FarmingInitParams,
-    FarmingUpdateVestParams,
-    FarmingUpdateVestResult
-} from "./TreasuryFundedFarmingInit.sol";
+import {TreasuryFundedFarmingInit, FarmingInitParams, FarmingInitResult} from "./TreasuryFundedFarmingInit.sol";
 
 contract TreasuryFundedFarmingInitTest is DssTest {
     ChainlogLike chainlog;
@@ -39,6 +34,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     address vest;
     address lockstakeEngine;
     address distJob;
+    uint256 initialVestCount;
     FarmingInitParams lfp;
     FarmingInitParams fp;
 
@@ -53,6 +49,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         sky = chainlog.getAddress("SKY");
         usds = chainlog.getAddress("USDS");
         vest = chainlog.getAddress("MCD_VEST_SKY_TREASURY");
+        initialVestCount = DssVestTransferrableLike(vest).ids();
         distJob = chainlog.getAddress("CRON_REWARDS_DIST_JOB");
 
         lfp = FarmingInitParams({
@@ -67,7 +64,14 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vest: vest,
             vestTot: 2_400_000 * 10 ** 18,
             vestBgn: block.timestamp - 7 days,
-            vestTau: 365 days
+            vestTau: 365 days,
+            beam: address(0),
+            beamKey: "REWARDS_BEAM_LSSKY_SKY",
+            mom: address(0),
+            momKey: "REWARDS_BEAM_MOM_LSSKY_SKY",
+            buds: new address[](2),
+            maxVestTot: 4_800_000 * 10 ** 18,
+            tau: 1 days
         });
         lfp.rewards = StakingRewardsDeploy.deploy(
             StakingRewardsDeployParams({
@@ -92,7 +96,14 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             vest: vest,
             vestTot: 2_400_000 * 10 ** 18,
             vestBgn: block.timestamp - 7 days,
-            vestTau: 365 days
+            vestTau: 365 days,
+            beam: address(0),
+            beamKey: "REWARDS_BEAM_USDS_SKY",
+            mom: address(0),
+            momKey: "REWARDS_BEAM_MOM_USDS_SKY",
+            buds: new address[](2),
+            maxVestTot: 4_800_000 * 10 ** 18,
+            tau: 1 days
         });
         fp.rewards = StakingRewardsDeploy.deploy(
             StakingRewardsDeployParams({
@@ -105,6 +116,8 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             })
         );
 
+        _deployBeam(lfp);
+        _deployBeam(fp);
         spell = new MockSpell();
     }
 
@@ -112,6 +125,16 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         uint256 allowance;
         uint256 cap;
         uint256 vestCount;
+    }
+
+    function _deployBeam(FarmingInitParams storage p) internal {
+        p.beam = deployCode("RewardsBeam.sol:RewardsBeam", abi.encode(p.dist));
+        p.mom = deployCode("RewardsBeamMom.sol:RewardsBeamMom", abi.encode(p.beam));
+        RewardsBeamLike(p.beam).rely(pauseProxy);
+        RewardsBeamLike(p.beam).deny(address(this));
+        RewardsBeamMomLike(p.mom).setOwner(pauseProxy);
+        p.buds[0] = address(0xB0B);
+        p.buds[1] = address(0xB0B2);
     }
 
     function testFarm_init() public {
@@ -351,14 +374,15 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             0,
             "after: should have distributed any unpaid amount"
         );
-        // Note: if there was a distribution, the allowance would've been decreased by the paid amount
-        uint256 expectedAllowance = b.allowance + p.vestTot - DssVestTransferrableLike(p.vest).rxd(b.vestCount + 1);
         assertEq(
-            ERC20Like(sky).allowance(pauseProxy, p.vest), expectedAllowance, "after: should set the correct allowance"
+            ERC20Like(sky).allowance(pauseProxy, p.vest),
+            type(uint256).max,
+            "after: should retain unlimited allowance after initial distribution"
         );
 
         // Adds 10% buffer
-        uint256 expectedRateWithBuffer = (11 * p.vestTot) / (10 * p.vestTau);
+        uint256 maxTot = p.vestTot > p.maxVestTot ? p.vestTot : p.maxVestTot;
+        uint256 expectedRateWithBuffer = (11 * maxTot) / (10 * p.vestTau);
         if (expectedRateWithBuffer > b.cap) {
             assertEq(
                 DssVestTransferrableLike(p.vest).cap(), expectedRateWithBuffer, "after: should set the correct cap"
@@ -366,376 +390,591 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         }
     }
 
-    struct CheckUpdateFarmVestValuesBefore {
-        uint256 allowance;
-        uint256 vestCount;
-        uint256 prevVestId;
-        uint256 prevVestTot;
-        uint256 prevVestRxd;
-        uint256 prevUnpaid;
-        uint256 rewardRate;
-    }
+    function testFarm_init_whenBeamMaximumNeedsHigherCap() public {
+        vm.prank(pauseProxy);
+        VestConfigLike(vest).file("cap", 1);
+        fp.maxVestTot = 100_000_000 ether;
+        fp.vestBgn = block.timestamp;
+        fp.vestTau = 1 days;
 
-    function testFarm_updateVest() public {
-        // First initialize the farm
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
 
-        // Create update params with new vesting schedule
-        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-            dist: fp.dist,
-            vestTot: 3_600_000 * 10 ** 18, // Increased amount
-            vestBgn: block.timestamp + 1 days, // Start tomorrow
-            vestTau: 180 days // Shorter vesting period
-        });
-
-        CheckUpdateFarmVestValuesBefore memory b = _checkFarm_updateVest_beforeSpell(updateParams);
-
-        // Simulate spell casting for update
-        vm.prank(pause);
-        bytes memory returnData =
-            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-        FarmingUpdateVestResult memory result = abi.decode(returnData, (FarmingUpdateVestResult));
-
-        _checkFarm_updateVest_afterSpell(updateParams, b, result);
+        uint256 expectedRateWithBuffer = (110 * fp.maxVestTot) / (100 * fp.vestTau);
+        assertEq(DssVestTransferrableLike(vest).cap(), expectedRateWithBuffer);
+        assertGt(expectedRateWithBuffer, 1);
+        assertEq(RewardsBeamLike(fp.beam).maxVestTot(), fp.maxVestTot);
+        assertEq(RewardsBeamLike(fp.beam).vestTau(), fp.vestTau);
     }
 
-    function testFarm_updateVest_withPreviousUnpaidAmount() public {
-        // First initialize the farm with past start time to generate unpaid amount
-        fp.vestBgn = block.timestamp - 7 days; // Started a week ago
+    function testFarm_beamConfiguration() public {
         vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-
-        // Fast forward to accumulate some unpaid amount
-        vm.warp(block.timestamp + 3 days);
-
-        // Create update params
-        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-            dist: fp.dist,
-            vestTot: 4_800_000 * 10 ** 18, // Even larger amount
-            vestBgn: block.timestamp - 1 days, // Start yesterday to create immediate unpaid amount
-            vestTau: 90 days // Much shorter vesting period
-        });
-
-        CheckUpdateFarmVestValuesBefore memory b = _checkFarm_updateVest_beforeSpell(updateParams);
-
-        // Ensure there's unpaid amount in previous vest
-        assertGt(b.prevUnpaid, 0, "Previous vest should have unpaid amount for test");
-
-        // Simulate spell casting for update
-        vm.prank(pause);
-        bytes memory returnData =
-            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-        FarmingUpdateVestResult memory result = abi.decode(returnData, (FarmingUpdateVestResult));
-
-        _checkFarm_updateVest_afterSpell(updateParams, b, result);
-
-        // Verify both previous and new distributions happened
-        assertGt(result.prevDistributedAmount, 0, "Should have distributed previous unpaid amount");
-        assertGt(result.distributedAmount, 0, "Should have distributed new unpaid amount");
+        bytes memory data = ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        FarmingInitResult memory result = abi.decode(data, (FarmingInitResult));
+        assertEq(result.vestId, VestedRewardsDistributionLike(fp.dist).vestId());
+        assertEq(result.distributedAmount, DssVestTransferrableLike(vest).rxd(result.vestId));
+        assertGt(result.distributedAmount, 0);
+        assertEq(AuthLike(vest).wards(fp.beam), 1);
+        assertEq(AuthLike(vest).wards(fp.mom), 1);
+        assertEq(AuthLike(fp.dist).wards(fp.beam), 1);
+        assertEq(RewardsBeamLike(fp.beam).wards(fp.mom), 1);
+        assertEq(RewardsBeamLike(fp.beam).wards(pauseProxy), 1);
+        assertEq(RewardsBeamLike(fp.beam).wards(address(this)), 0);
+        assertEq(AuthLike(vest).wards(address(this)), 0);
+        assertEq(RewardsBeamLike(fp.beam).maxVestTot(), fp.maxVestTot);
+        assertEq(RewardsBeamLike(fp.beam).vestTau(), fp.vestTau);
+        assertEq(RewardsBeamLike(fp.beam).tau(), fp.tau);
+        assertEq(RewardsBeamLike(fp.beam).toc(), 0);
+        for (uint256 i; i < fp.buds.length; i++) {
+            assertEq(RewardsBeamLike(fp.beam).buds(fp.buds[i]), 1);
+            assertEq(AuthLike(vest).wards(fp.buds[i]), 0);
+            assertEq(AuthLike(fp.dist).wards(fp.buds[i]), 0);
+            assertEq(RewardsBeamLike(fp.beam).wards(fp.buds[i]), 0);
+        }
+        assertEq(RewardsBeamMomLike(fp.mom).authority(), chainlog.getAddress("MCD_ADM"));
+        assertEq(chainlog.getAddress(fp.beamKey), fp.beam);
+        assertEq(chainlog.getAddress(fp.momKey), fp.mom);
     }
 
-    function testFarm_updateVest_whenCapNeedsAdjustment() public {
-        // Initialize farm
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-
-        // Record original cap and mock low cap to force adjustment
-        address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
-        uint256 originalCap = DssVestTransferrableLike(vestAddr).cap();
-        vm.mockCall(address(vestAddr), abi.encodeWithSignature("cap()"), abi.encode(uint256(1)));
-
-        // Create update params with high rate requiring cap adjustment
-        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-            dist: fp.dist,
-            vestTot: 100_000_000 * 10 ** 18, // Very high amount to force cap adjustment
-            vestBgn: block.timestamp + 1 days,
-            vestTau: 1 days // Very short period = very high rate
-        });
-
-        uint256 expectedRateWithBuffer = (110 * updateParams.vestTot) / (100 * updateParams.vestTau);
-
-        // Simulate spell casting for update
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-
-        vm.clearMockedCalls();
-
-        // Verify the vest was created successfully
-        uint256 newVestId = VestedRewardsDistributionLike(fp.dist).vestId();
-        assertGt(newVestId, 0, "New vest should be created");
-
-        // Verify the cap was adjusted to the expected rate with buffer
-        uint256 newCap = DssVestTransferrableLike(vestAddr).cap();
-        assertEq(newCap, expectedRateWithBuffer, "Cap should be adjusted to expected rate with buffer");
-        assertGt(newCap, originalCap, "New cap should be greater than original cap");
+    function testFarm_init_withExistingUnlimitedAllowance() public {
+        vm.prank(pauseProxy);
+        ERC20Like(sky).approve(vest, type(uint256).max);
+        // The previous helper overflowed when adding the initial total to this approval.
+        testFarm_init();
     }
 
-    function testRevert_updateVest_whenVestCzarMismatch() public {
-        // Initialize farm first
+    function testFarm_init_upgradesFiniteAllowance() public {
+        vm.prank(pauseProxy);
+        ERC20Like(sky).approve(vest, 200_000_000 ether);
+        testFarm_init();
+    }
+
+    function testFarm_init_unlimitedAllowance() public {
+        uint256 treasuryBalance = ERC20Like(sky).balanceOf(pauseProxy);
         vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        bytes memory data = ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        FarmingInitResult memory result = abi.decode(data, (FarmingInitResult));
+        assertGt(result.distributedAmount, 0);
+        assertEq(ERC20Like(sky).balanceOf(pauseProxy), treasuryBalance - result.distributedAmount);
+        // SKY does not decrease an unlimited approval on transferFrom.
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
+    }
 
-        // Mock vest.czar() to return wrong address
-        address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
-        vm.mockCall(address(vestAddr), abi.encodeWithSignature("czar()"), abi.encode(address(0x1337)));
+    function testFarm_init_sharedVestAllowance() public {
+        testLockstakeFarm_init();
+        testFarm_init();
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
+        // Both farms retain independent beam permissions on the shared vest.
+        assertEq(AuthLike(vest).wards(lfp.beam), 1);
+        assertEq(AuthLike(vest).wards(fp.beam), 1);
+        assertNotEq(VestedRewardsDistributionLike(lfp.dist).vestId(), VestedRewardsDistributionLike(fp.dist).vestId());
+    }
 
-        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-            dist: fp.dist, vestTot: 1_200_000 * 10 ** 18, vestBgn: block.timestamp + 1 days, vestTau: 90 days
-        });
-
+    function testRevert_farm_init_insufficientTreasuryBalance() public {
+        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
+        deal(sky, pauseProxy, 0);
         vm.expectRevert("ds-pause-delegatecall-error");
         vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        _assertInitUnchanged(0, b);
+    }
 
+    function testRevert_farm_init_invalidBeamCooldown() public {
+        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
+        fp.tau = uint256(type(uint64).max) + 1;
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        // Invalid cooldowns must be rejected before stream creation, funding and permissions.
+        assertEq(DssVestTransferrableLike(vest).ids(), b.vestCount);
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), b.allowance);
+        assertEq(AuthLike(vest).wards(fp.beam), 0);
+        assertEq(RewardsBeamLike(fp.beam).wards(fp.mom), 0);
+    }
+
+    function testRevert_farm_init_failedApproval() public {
+        fp.vestBgn = block.timestamp + 1 days;
+        vm.mockCall(
+            sky, abi.encodeWithSignature("approve(address,uint256)", vest, type(uint256).max), abi.encode(false)
+        );
+        _assertInitReverts("initFarm/rewards-approve-failed");
+    }
+
+    function testRevert_farm_init_unchangedAllowance() public {
+        fp.vestBgn = block.timestamp + 1 days;
+        vm.prank(pauseProxy);
+        ERC20Like(sky).approve(vest, 0);
+        vm.mockCall(sky, abi.encodeWithSignature("approve(address,uint256)", vest, type(uint256).max), abi.encode(true));
+        _assertInitReverts("initFarm/rewards-allowance-mismatch");
+    }
+
+    function testRevert_farm_init_impossibleBeamMaximum() public {
+        fp.maxVestTot = uint256(type(uint128).max) + 1;
+        _assertInitReverts("initFarm/max-vest-tot-too-large");
+    }
+
+    function testRevert_farm_init_largestNumericInputs() public {
+        uint256 initialTotal = fp.vestTot;
+        fp.vestTot = type(uint256).max;
+        _assertInitReverts("initFarm/vest-tot-too-large");
+        fp.vestTot = initialTotal;
+        uint256 maximumTotal = fp.maxVestTot;
+        fp.maxVestTot = type(uint256).max;
+        _assertInitReverts("initFarm/max-vest-tot-too-large");
+        fp.maxVestTot = maximumTotal;
+        fp.tau = type(uint256).max;
+        _assertInitReverts("initFarm/invalid-tau");
+    }
+
+    function testRevert_farm_init_pendingOwner() public {
+        vm.prank(pauseProxy);
+        StakingRewardsLike(fp.rewards).nominateNewOwner(address(0xBAD));
+        _assertInitReverts("initFarm/pending-owner");
+    }
+
+    function testRevert_farm_init_invalidDuration() public {
+        fp.vestTau = 0;
+        _assertInitReverts("initFarm/vest-tau-zero");
+        fp.vestTau = 20 * 365 days + 1;
+        _assertInitReverts("initFarm/vest-tau-too-long");
+    }
+
+    function testRevert_farm_init_invalidInitialTotal() public {
+        fp.vestTot = 0;
+        _assertInitReverts("initFarm/vest-tot-zero");
+        fp.vestTot = uint256(type(uint128).max) + 1;
+        _assertInitReverts("initFarm/vest-tot-too-large");
+    }
+
+    function testRevert_farm_init_invalidChief() public {
+        vm.mockCall(
+            address(chainlog),
+            abi.encodeWithSignature("getAddress(bytes32)", bytes32("MCD_ADM")),
+            abi.encode(address(0xBAD))
+        );
+        // Failure after funding and permission changes must undo the whole initialization.
+        _assertInitReverts("initFarm/invalid-chief");
+    }
+
+    function testRevert_farm_init_zeroFacilitator() public {
+        for (uint256 i; i < fp.buds.length; i++) {
+            address bud = fp.buds[i];
+            fp.buds[i] = address(0);
+            _assertInitReverts("initFarm/zero-facilitator");
+            fp.buds[i] = bud;
+        }
+    }
+
+    function testRevert_farm_init_zeroChainlogKey() public {
+        bytes32[4] memory keys = [fp.rewardsKey, fp.distKey, fp.beamKey, fp.momKey];
+        for (uint256 i; i < keys.length; i++) {
+            bytes32 key = keys[i];
+            keys[i] = bytes32(0);
+            _setChainlogKeys(keys);
+            _assertInitReverts("initFarm/zero-chainlog-key");
+            keys[i] = key;
+        }
+        _setChainlogKeys(keys);
+    }
+
+    function testRevert_farm_init_eachChainlogKeyCollision() public {
+        bytes32[4] memory keys = [fp.rewardsKey, fp.distKey, fp.beamKey, fp.momKey];
+        for (uint256 first; first < 3; first++) {
+            for (uint256 second = first + 1; second < keys.length; second++) {
+                bytes32 key = keys[second];
+                keys[second] = keys[first];
+                _setChainlogKeys(keys);
+                _assertInitReverts("initFarm/duplicate-chainlog-key");
+                keys[second] = key;
+            }
+        }
+        _setChainlogKeys(keys);
+    }
+
+    function _setChainlogKeys(bytes32[4] memory keys) internal {
+        fp.rewardsKey = keys[0];
+        fp.distKey = keys[1];
+        fp.beamKey = keys[2];
+        fp.momKey = keys[3];
+    }
+
+    function testRevert_farm_init_duplicateChainlogKeys_Fuzz(uint256 first, uint256 second) public {
+        first = bound(first, 0, 2);
+        second = bound(second, first + 1, 3);
+        bytes32[4] memory keys = [fp.rewardsKey, fp.distKey, fp.beamKey, fp.momKey];
+        keys[second] = keys[first];
+        _setChainlogKeys(keys);
+        _assertInitReverts("initFarm/duplicate-chainlog-key");
+    }
+
+    function _assertInitReverts(string memory reason) internal {
+        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
+        uint256 treasuryBalance = ERC20Like(sky).balanceOf(pauseProxy);
+        _assertInitFailure(reason);
+        _assertInitUnchanged(treasuryBalance, b);
+    }
+
+    function _assertInitFailure(string memory reason) internal {
+        vm.prank(pause);
+        bytes memory data = ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.tryInitFarm, (fp)));
+        (bool success, bytes memory result) = abi.decode(data, (bool, bytes));
+        assertFalse(success, "Initialization should fail");
+        assertEq(result, abi.encodeWithSignature("Error(string)", reason), "Unexpected initialization failure");
+    }
+
+    function _assertInitUnchanged(uint256 treasuryBalance, CheckInitFarmValuesBefore memory b) internal view {
+        assertEq(DssVestTransferrableLike(vest).ids(), b.vestCount);
+        assertEq(DssVestTransferrableLike(vest).cap(), b.cap);
+        assertEq(VestedRewardsDistributionLike(fp.dist).vestId(), 0);
+        assertEq(StakingRewardsLike(fp.rewards).rewardsDistribution(), address(0));
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), b.allowance);
+        assertEq(ERC20Like(sky).balanceOf(pauseProxy), treasuryBalance);
+        assertEq(ERC20Like(sky).balanceOf(fp.rewards), 0);
+        assertEq(AuthLike(vest).wards(fp.beam), 0);
+        assertEq(AuthLike(vest).wards(fp.mom), 0);
+        assertEq(AuthLike(fp.dist).wards(fp.beam), 0);
+        assertEq(RewardsBeamLike(fp.beam).wards(fp.mom), 0);
+        for (uint256 i; i < fp.buds.length; i++) {
+            assertEq(RewardsBeamLike(fp.beam).buds(fp.buds[i]), 0);
+        }
+    }
+
+    function _initFarm() internal returns (FarmingInitResult memory result) {
+        vm.prank(pause);
+        bytes memory data = ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        result = abi.decode(data, (FarmingInitResult));
+    }
+
+    function _assertInitWithoutAccrual() internal {
+        uint256 treasuryBalance = ERC20Like(sky).balanceOf(pauseProxy);
+        FarmingInitResult memory result = _initFarm();
+        assertEq(result.vestId, initialVestCount + 1);
+        assertEq(result.distributedAmount, 0);
+        assertEq(DssVestTransferrableLike(vest).tot(result.vestId), fp.vestTot);
+        assertEq(DssVestTransferrableLike(vest).bgn(result.vestId), fp.vestBgn);
+        assertEq(DssVestTransferrableLike(vest).fin(result.vestId), fp.vestBgn + fp.vestTau);
+        assertEq(VestConfigLike(vest).res(result.vestId), 1);
+        assertEq(VestConfigLike(vest).usr(result.vestId), fp.dist);
+        assertEq(RewardsBeamLike(fp.beam).maxVestTot(), fp.maxVestTot);
+        assertEq(RewardsBeamLike(fp.beam).vestTau(), fp.vestTau);
+        assertEq(RewardsBeamLike(fp.beam).tau(), fp.tau);
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
+        assertEq(ERC20Like(sky).balanceOf(pauseProxy), treasuryBalance);
+        assertGe(DssVestTransferrableLike(vest).cap(), fp.vestTot / fp.vestTau);
+        assertGe(DssVestTransferrableLike(vest).cap(), fp.maxVestTot / fp.vestTau);
+    }
+
+    function testFarm_init_validParameters_Fuzz(
+        uint128 initialTotal,
+        uint128 maximumTotal,
+        uint32 duration,
+        uint64 cooldown,
+        uint32 startDelay,
+        uint256 allowance
+    ) public {
+        fp.vestTot = bound(initialTotal, 1, type(uint128).max);
+        fp.maxVestTot = maximumTotal;
+        fp.vestTau = bound(duration, 1, 20 * 365 days);
+        fp.tau = cooldown;
+        fp.vestBgn = block.timestamp + bound(startDelay, 1, 2 days);
+        vm.prank(pauseProxy);
+        ERC20Like(sky).approve(vest, allowance);
+        _assertInitWithoutAccrual();
+    }
+
+    function testFarm_init_maximumTotalsAndMinimumDuration() public {
+        fp.vestTot = type(uint128).max;
+        fp.maxVestTot = type(uint128).max;
+        fp.vestTau = 1;
+        fp.vestBgn = block.timestamp;
+        _assertInitWithoutAccrual();
+    }
+
+    function testFarm_init_minimumTotalAndMaximumDuration() public {
+        uint256 cap = DssVestTransferrableLike(vest).cap();
+        fp.vestTot = 1;
+        fp.maxVestTot = 1;
+        fp.vestTau = 20 * 365 days;
+        fp.vestBgn = block.timestamp;
+        _assertInitWithoutAccrual();
+        assertEq(DssVestTransferrableLike(vest).cap(), cap); // The existing cap must not be lowered.
+    }
+
+    function testFarm_init_maximumCooldown() public {
+        fp.tau = type(uint64).max;
+        fp.vestBgn = block.timestamp;
+        _assertInitWithoutAccrual();
+    }
+
+    function testFarm_init_futureStartUpperBoundary() public {
+        fp.vestBgn = block.timestamp + 20 * 365 days;
+        _assertInitReverts("DssVest/bgn-too-far");
+        fp.vestBgn -= 1;
+        _assertInitWithoutAccrual();
+    }
+
+    function testFarm_init_pastStartLowerBoundary() public {
+        fp.vestBgn = block.timestamp - 20 * 365 days;
+        _assertInitReverts("DssVest/bgn-too-long-ago");
+        fp.vestBgn += 1;
+        uint256 treasuryBalance = ERC20Like(sky).balanceOf(pauseProxy);
+        FarmingInitResult memory result = _initFarm();
+        assertEq(result.distributedAmount, fp.vestTot);
+        assertEq(DssVestTransferrableLike(vest).rxd(result.vestId), fp.vestTot);
+        assertEq(ERC20Like(sky).balanceOf(fp.rewards), fp.vestTot);
+        assertEq(ERC20Like(sky).balanceOf(pauseProxy), treasuryBalance - fp.vestTot);
+    }
+
+    function testRevert_farm_init_extremeStartTimes() public {
+        fp.vestBgn = 0;
+        _assertInitReverts("DssVest/bgn-too-long-ago");
+        fp.vestBgn = type(uint256).max;
+        _assertInitReverts("DssVest/bgn-too-far");
+    }
+
+    function testFarm_init_preservesEqualCap() public {
+        uint256 cap = (110 * fp.maxVestTot) / (100 * fp.vestTau);
+        vm.prank(pauseProxy);
+        VestConfigLike(vest).file("cap", cap);
+        vm.expectCall(vest, abi.encodeWithSignature("file(bytes32,uint256)", bytes32("cap"), cap), uint64(0));
+        _initFarm();
+        assertEq(DssVestTransferrableLike(vest).cap(), cap);
+    }
+
+    function testFarm_init_duplicateFacilitators() public {
+        fp.buds[1] = fp.buds[0];
+        _initFarm();
+        assertEq(RewardsBeamLike(fp.beam).buds(fp.buds[0]), 1);
+        assertEq(RewardsBeamLike(fp.beam).wards(fp.buds[0]), 0);
+        assertEq(DssVestTransferrableLike(vest).ids(), initialVestCount + 1);
+    }
+
+    function testFarm_init_facilitatorLists_Fuzz(uint8 count, uint256 seed) public {
+        count = uint8(bound(count, 0, 8));
+        fp.buds = new address[](count);
+        for (uint256 i; i < count; i++) {
+            // Generate nonzero addresses; duplicate handling is tested separately.
+            fp.buds[i] = address(uint160(uint256(keccak256(abi.encode(seed, i)))) | uint160(1));
+        }
+        _initFarm();
+        for (uint256 i; i < count; i++) {
+            assertEq(RewardsBeamLike(fp.beam).buds(fp.buds[i]), 1);
+        }
+        assertEq(DssVestTransferrableLike(vest).ids(), initialVestCount + 1);
+    }
+
+    function testFarm_init_noFacilitatorsWithActiveMaximum() public {
+        delete fp.buds;
+        _initFarm();
+        assertEq(RewardsBeamLike(fp.beam).maxVestTot(), fp.maxVestTot);
+        assertEq(RewardsBeamLike(fp.beam).buds(address(0xB0B)), 0);
+    }
+
+    function testFarm_init_zeroMaximumWithFacilitators() public {
+        fp.maxVestTot = 0;
+        _initFarm();
+        assertEq(RewardsBeamLike(fp.beam).maxVestTot(), 0);
+        for (uint256 i; i < fp.buds.length; i++) {
+            assertEq(RewardsBeamLike(fp.beam).buds(fp.buds[i]), 1);
+        }
+        assertEq(VestedRewardsDistributionLike(fp.dist).vestId(), initialVestCount + 1);
+        assertEq(RewardsBeamLike(fp.beam).toc(), 0);
+    }
+
+    function testRevert_farm_init_missingVestPermission() public {
+        vm.prank(pauseProxy);
+        AuthLike(vest).deny(pauseProxy);
+        _assertInitReverts("DssVest/not-authorized");
+    }
+
+    function testRevert_farm_init_missingDistributorPermission() public {
+        vm.prank(pauseProxy);
+        AuthLike(fp.dist).deny(pauseProxy);
+        _assertInitReverts("VestedRewardsDistribution/not-authorized");
+    }
+
+    function testRevert_farm_init_missingBeamPermission() public {
+        vm.prank(pauseProxy);
+        RewardsBeamLike(fp.beam).deny(pauseProxy);
+        _assertInitReverts("RewardsBeam/not-authorized");
+    }
+
+    function testRevert_farm_init_unavailableDependencies() public {
+        for (uint256 field; field < 6; field++) {
+            _assertUnavailableDependency(field, address(0));
+            _assertUnavailableDependency(field, address(0xBAD));
+        }
+    }
+
+    function _assertUnavailableDependency(uint256 field, address unavailable) internal {
+        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
+        FarmingInitParams memory invalid = fp;
+        if (field == 0) invalid.vest = unavailable;
+        else if (field == 1) invalid.rewards = unavailable;
+        else if (field == 2) invalid.dist = unavailable;
+        else if (field == 3) invalid.beam = unavailable;
+        else if (field == 4) invalid.mom = unavailable;
+        else invalid.distJob = unavailable;
+        uint256 treasuryBalance = ERC20Like(sky).balanceOf(pauseProxy);
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (invalid)));
+        _assertInitUnchanged(treasuryBalance, b);
+    }
+
+    function testRevert_farm_init_jobRejectsInterval() public {
+        fp.distJobInterval = 0;
+        // The job owns interval validation; any rejection must undo earlier funding and stream creation.
+        vm.mockCallRevert(
+            distJob,
+            abi.encodeWithSignature("set(address,uint256)", fp.dist, fp.distJobInterval),
+            abi.encodeWithSignature("Error(string)", "Job/invalid-interval")
+        );
+        _assertInitReverts("Job/invalid-interval");
+    }
+
+    function testRevert_farm_init_approvalReverts() public {
+        vm.mockCallRevert(
+            sky,
+            abi.encodeWithSignature("approve(address,uint256)", vest, type(uint256).max),
+            abi.encodeWithSignature("Error(string)", "Token/approval-disabled")
+        );
+        _assertInitReverts("Token/approval-disabled");
+    }
+
+    function testRevert_farm_init_approvalHasInvalidReturnData() public {
+        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
+        fp.vestBgn = block.timestamp + 1 days;
+        vm.mockCall(sky, abi.encodeWithSignature("approve(address,uint256)", vest, type(uint256).max), bytes(""));
+        uint256 treasuryBalance = ERC20Like(sky).balanceOf(pauseProxy);
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        _assertInitUnchanged(treasuryBalance, b);
+        vm.mockCall(
+            sky, abi.encodeWithSignature("approve(address,uint256)", vest, type(uint256).max), abi.encode(uint256(2))
+        );
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        _assertInitUnchanged(treasuryBalance, b);
+    }
+
+    function testRevert_farm_init_replayBeforeStreamBegins() public {
+        fp.vestBgn = block.timestamp + 1 days;
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        uint256 treasuryBalance = ERC20Like(sky).balanceOf(pauseProxy);
+        assertEq(StakingRewardsLike(fp.rewards).rewardRate(), 0);
+        _assertInitFailure("initFarm/rewards-distribution-already-set");
+        assertEq(DssVestTransferrableLike(vest).ids(), initialVestCount + 1);
+        assertEq(VestedRewardsDistributionLike(fp.dist).vestId(), initialVestCount + 1);
+        assertEq(ERC20Like(sky).balanceOf(pauseProxy), treasuryBalance);
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
+    }
+
+    function testFarm_init_futureStreamDoesNotDistribute() public {
+        fp.vestBgn = block.timestamp + 1 days;
+        vm.prank(pause);
+        bytes memory data = ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        FarmingInitResult memory result = abi.decode(data, (FarmingInitResult));
+        assertEq(result.distributedAmount, 0);
+        assertEq(StakingRewardsLike(fp.rewards).rewardRate(), 0);
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
+        assertEq(RewardsBeamLike(fp.beam).maxVestTot(), fp.maxVestTot);
+    }
+
+    function testFarm_init_preservesHigherCap() public {
+        vm.prank(pauseProxy);
+        VestConfigLike(vest).file("cap", 100 ether);
+        testFarm_init();
+        assertEq(DssVestTransferrableLike(vest).cap(), 100 ether);
+    }
+
+    function testFarm_init_initialTotalAboveBeamMaximum() public {
+        fp.maxVestTot = fp.vestTot / 2;
+        testFarm_init();
+    }
+
+    function testFarm_init_withoutFacilitators() public {
+        delete fp.buds;
+        fp.maxVestTot = 0;
+        testFarm_init();
+        assertEq(RewardsBeamLike(fp.beam).buds(address(0xB0B)), 0);
+    }
+
+    function testRevert_farm_init_beamSanityChecks() public {
+        _expectInitRevert(fp.beam, abi.encodeWithSignature("toc()"), abi.encode(uint128(1)));
+        _expectInitRevert(fp.beam, abi.encodeWithSignature("dist()"), abi.encode(address(0xBAD)));
+        _expectInitRevert(fp.beam, abi.encodeWithSignature("vest()"), abi.encode(address(0xBAD)));
+        _expectInitRevert(fp.mom, abi.encodeWithSignature("beam()"), abi.encode(address(0xBAD)));
+        _expectInitRevert(fp.mom, abi.encodeWithSignature("dist()"), abi.encode(address(0xBAD)));
+        _expectInitRevert(fp.mom, abi.encodeWithSignature("vest()"), abi.encode(address(0xBAD)));
+        _expectInitRevert(fp.mom, abi.encodeWithSignature("owner()"), abi.encode(address(0xBAD)));
+        _expectInitRevert(fp.dist, abi.encodeWithSignature("stakingRewards()"), abi.encode(address(0xBAD)));
+    }
+
+    function testRevert_farm_init_requiresBeamAndMom() public {
+        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
+        address beam = fp.beam;
+        fp.beam = address(0);
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+        fp.beam = beam;
+        fp.mom = address(0);
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        assertEq(DssVestTransferrableLike(vest).ids(), initialVestCount);
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), b.allowance);
+    }
+
+    function _expectInitRevert(address target, bytes memory callData, bytes memory returnData) internal {
+        vm.mockCall(target, callData, returnData);
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
         vm.clearMockedCalls();
+        assertEq(DssVestTransferrableLike(vest).ids(), initialVestCount);
+        assertEq(AuthLike(vest).wards(fp.beam), 0);
     }
 
-    function testFarm_updateVest_allowanceCalculation() public {
-        // Initialize farm
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-
-        // Fast forward to create some received amount
-        vm.warp(block.timestamp + 30 days);
-
-        address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
-        address rewardsToken = VestedRewardsDistributionLike(fp.dist).gem();
-        uint256 prevVestId = VestedRewardsDistributionLike(fp.dist).vestId();
-
-        // Record state before update
-        uint256 prevVestTot = DssVestTransferrableLike(vestAddr).tot(prevVestId);
-
-        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-            dist: fp.dist,
-            vestTot: 3_000_000 * 10 ** 18, // Different amount to test allowance calculation
-            vestBgn: block.timestamp + 1 days,
-            vestTau: 200 days
-        });
-
-        // Force some distribution to happen before update
-        VestedRewardsDistributionLike(fp.dist).distribute();
-        uint256 prevVestRxdAfterDist = DssVestTransferrableLike(vestAddr).rxd(prevVestId);
-
-        // Record allowance after the distribution to get accurate baseline
-        uint256 prevAllowanceAfterDist = ERC20Like(rewardsToken).allowance(pauseProxy, vestAddr);
-
-        // Update vest
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-
-        // Check that allowance was correctly calculated
-        uint256 currAllowanceAfter = ERC20Like(rewardsToken).allowance(pauseProxy, vestAddr);
-        uint256 expectedChange = updateParams.vestTot - (prevVestTot - prevVestRxdAfterDist);
-        uint256 expectedAllowance = prevAllowanceAfterDist + expectedChange;
-
-        // Use 1% tolerance for allowance calculation verification
-        assertApproxEqRel(
-            currAllowanceAfter,
-            expectedAllowance,
-            1e16, // 1% tolerance (1e18 = 100%)
-            "Allowance calculation should be approximately correct"
-        );
-    }
-
-    function testFarm_updateVest_vestCreationParameters() public {
-        // Initialize farm
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-
-        uint256 customVestTot = 5_000_000 * 10 ** 18;
-        uint256 customVestBgn = block.timestamp + 7 days;
-        uint256 customVestTau = 45 days;
-
-        FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-            dist: fp.dist, vestTot: customVestTot, vestBgn: customVestBgn, vestTau: customVestTau
-        });
-
-        address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
-        uint256 vestCountBefore = DssVestTransferrableLike(vestAddr).ids();
-
-        // Update vest
-        vm.prank(pause);
-        bytes memory returnData =
-            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-        FarmingUpdateVestResult memory result = abi.decode(returnData, (FarmingUpdateVestResult));
-
-        // Verify new vest has correct parameters
-        uint256 newVestId = result.vestId;
-        assertEq(newVestId, vestCountBefore + 1, "Should create exactly one new vest");
-        assertEq(DssVestTransferrableLike(vestAddr).tot(newVestId), customVestTot, "New vest should have correct total");
-        assertEq(
-            DssVestTransferrableLike(vestAddr).bgn(newVestId), customVestBgn, "New vest should have correct begin time"
-        );
-        assertEq(
-            DssVestTransferrableLike(vestAddr).fin(newVestId),
-            customVestBgn + customVestTau,
-            "New vest should have correct finish time"
-        );
-
-        // Verify the vest is properly linked to distribution
-        assertEq(VestedRewardsDistributionLike(fp.dist).vestId(), newVestId, "Distribution should point to new vest");
-    }
-
-    function testRevert_updateVest_whenInvalidParams() public {
-        // Initialize farm first
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-
-        // Test vestTot = 0
-        {
-            FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-                dist: fp.dist,
-                vestTot: 0, // Invalid
-                vestBgn: block.timestamp + 1 days,
-                vestTau: 90 days
-            });
-
-            vm.expectRevert("ds-pause-delegatecall-error");
-            vm.prank(pause);
-            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-        }
-
-        // Test vestTau = 0 (division by zero risk)
-        {
-            FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-                dist: fp.dist,
-                vestTot: 1_200_000 * 10 ** 18,
-                vestBgn: block.timestamp + 1 days,
-                vestTau: 0 // Invalid - would cause division by zero
-            });
-
-            vm.expectRevert("ds-pause-delegatecall-error");
-            vm.prank(pause);
-            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-        }
-
-        // Test dist with vestId = 0 (not initialized)
-        {
-            // Deploy a new distribution that hasn't been initialized
-            address uninitDist = VestedRewardsDistributionDeploy.deploy(
-                VestedRewardsDistributionDeployParams({
-                    deployer: address(this), owner: pauseProxy, vest: fp.vest, rewards: fp.rewards
-                })
-            );
-
-            FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-                dist: uninitDist, // This dist has vestId = 0
-                vestTot: 1_200_000 * 10 ** 18,
-                vestBgn: block.timestamp + 1 days,
-                vestTau: 90 days
-            });
-
-            vm.expectRevert("ds-pause-delegatecall-error");
-            vm.prank(pause);
-            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-        }
-
-        // Test vest gem mismatch
-        {
-            address vestAddr = VestedRewardsDistributionLike(fp.dist).dssVest();
-            vm.mockCall(address(vestAddr), abi.encodeWithSignature("gem()"), abi.encode(address(0x1337)));
-
-            FarmingUpdateVestParams memory updateParams = FarmingUpdateVestParams({
-                dist: fp.dist, vestTot: 1_200_000 * 10 ** 18, vestBgn: block.timestamp + 1 days, vestTau: 90 days
-            });
-
-            vm.expectRevert("ds-pause-delegatecall-error");
-            vm.prank(pause);
-            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.updateFarmVest, (updateParams)));
-
-            vm.clearMockedCalls();
-        }
-    }
-
-    function _checkFarm_updateVest_beforeSpell(FarmingUpdateVestParams memory p)
-        internal
-        view
-        returns (CheckUpdateFarmVestValuesBefore memory b)
-    {
-        address vestAddr = VestedRewardsDistributionLike(p.dist).dssVest();
-        address rewardsToken = VestedRewardsDistributionLike(p.dist).gem();
-
-        b.allowance = ERC20Like(rewardsToken).allowance(pauseProxy, vestAddr);
-        b.vestCount = DssVestTransferrableLike(vestAddr).ids();
-        b.prevVestId = VestedRewardsDistributionLike(p.dist).vestId();
-        b.prevVestTot = DssVestTransferrableLike(vestAddr).tot(b.prevVestId);
-        b.prevVestRxd = DssVestTransferrableLike(vestAddr).rxd(b.prevVestId);
-        b.prevUnpaid = DssVestTransferrableLike(vestAddr).unpaid(b.prevVestId);
-        b.rewardRate = StakingRewardsLike(VestedRewardsDistributionLike(p.dist).stakingRewards()).rewardRate();
-
-        // Verify previous vest exists
-        assertGt(b.prevVestId, 0, "before: should have existing vest to update");
-    }
-
-    function _checkFarm_updateVest_afterSpell(
-        FarmingUpdateVestParams memory p,
-        CheckUpdateFarmVestValuesBefore memory b,
-        FarmingUpdateVestResult memory result
-    ) internal view {
-        address vestAddr = VestedRewardsDistributionLike(p.dist).dssVest();
-        address rewardsToken = VestedRewardsDistributionLike(p.dist).gem();
-        address stakingRewards = VestedRewardsDistributionLike(p.dist).stakingRewards();
-
-        // Verify result values
-        assertEq(result.prevVestId, b.prevVestId, "after: should return correct previous vestId");
-        assertEq(result.prevDistributedAmount, b.prevUnpaid, "after: should return correct previous distributed amount");
-
-        // Verify new vest was created
-        assertEq(DssVestTransferrableLike(vestAddr).ids(), b.vestCount + 1, "after: should create exactly one new vest");
-        assertEq(result.vestId, b.vestCount + 1, "after: should return correct new vestId");
-
-        // Verify new vest is set in distribution
-        assertEq(
-            VestedRewardsDistributionLike(p.dist).vestId(), result.vestId, "after: should update vestId in distribution"
-        );
-
-        // Verify previous vest was yanked (unpaid should be 0)
-        assertEq(DssVestTransferrableLike(vestAddr).unpaid(b.prevVestId), 0, "after: yanked vest should have 0 unpaid");
-
-        // Verify allowance was adjusted correctly
-        uint256 expectedAllowance = b.allowance + p.vestTot - (b.prevVestTot - b.prevVestRxd) - result.distributedAmount;
-        assertEq(
-            ERC20Like(rewardsToken).allowance(pauseProxy, vestAddr),
-            expectedAllowance,
-            "after: should adjust allowance correctly"
-        );
-
-        // Note: The reward rate in StakingRewards is updated during distribution, not immediately
-        // We verify that the new vesting parameters are in place, which will affect future distributions
-        uint256 currentRewardRate = StakingRewardsLike(stakingRewards).rewardRate();
-        // The reward rate should be positive only if there was a distribution
-        if (result.distributedAmount > 0) {
-            assertGt(currentRewardRate, 0, "after: reward rate should be positive when distribution occurred");
-        }
-
-        // Verify distributions occurred if there was unpaid amount
-        if (p.vestBgn < block.timestamp) {
-            assertEq(
-                VestedRewardsDistributionLike(p.dist).lastDistributedAt(),
-                block.timestamp,
-                "after: should have distributed if vesting already started"
-            );
-        }
+    function testFarm_init_wiresMomEmergencyStop() public {
+        testFarm_init();
+        uint256 id = VestedRewardsDistributionLike(fp.dist).vestId();
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(ChiefLike(chainlog.getAddress("MCD_ADM")).hat());
+        RewardsBeamMomLike(fp.mom).stop();
+        assertEq(RewardsBeamLike(fp.beam).tau(), type(uint64).max);
+        assertEq(DssVestTransferrableLike(vest).fin(id), block.timestamp);
     }
 }
 
 contract MockSpell {
-    function initFarm(FarmingInitParams memory p) public {
-        TreasuryFundedFarmingInit.initFarm(p);
+    address immutable self = address(this);
+
+    function initFarm(FarmingInitParams memory p) public returns (FarmingInitResult memory) {
+        return TreasuryFundedFarmingInit.initFarm(p);
+    }
+
+    // Preserve the real Pause Proxy context while returning the initializer's exact failure to the test.
+    function tryInitFarm(FarmingInitParams memory p) public returns (bool success, bytes memory data) {
+        return self.delegatecall(abi.encodeCall(this.initFarm, (p)));
     }
 
     function initLockstakeFarm(FarmingInitParams memory p, address lockstakeEngine) public {
         TreasuryFundedFarmingInit.initLockstakeFarm(p, address(lockstakeEngine));
     }
-
-    function updateFarmVest(FarmingUpdateVestParams memory p) public returns (FarmingUpdateVestResult memory r) {
-        return TreasuryFundedFarmingInit.updateFarmVest(p);
-    }
 }
 
 interface ChainlogLike {
     function getAddress(bytes32 key) external view returns (address addr);
+}
+
+interface ChiefLike {
+    function hat() external view returns (address);
 }
 
 interface ProxyLike {
@@ -754,21 +993,16 @@ interface DssVestTransferrableLike {
 }
 
 interface StakingRewardsLike {
-    function balanceOf(address who) external view returns (uint256);
-    function earned(address who) external view returns (uint256);
-    function getReward() external;
+    function nominateNewOwner(address owner) external;
     function owner() external view returns (address);
     function rewardRate() external view returns (uint256);
     function rewardsDistribution() external view returns (address);
     function rewardsToken() external view returns (address);
-    function stake(uint256 amount) external;
     function stakingToken() external view returns (address);
-    function withdraw(uint256 amount) external;
 }
 
 interface VestedRewardsDistributionLike {
     function dssVest() external view returns (address);
-    function distribute() external;
     function gem() external view returns (address);
     function lastDistributedAt() external view returns (uint256);
     function stakingRewards() external view returns (address);
@@ -793,12 +1027,27 @@ interface LockstakeEngineLike {
     }
 
     function farms(address farm) external view returns (FarmStatus);
-    function free(address owner, uint256 urnIndex, address to, uint256 wad) external;
-    function getReward(address owner, uint256 index, address farm, address to) external returns (uint256 amt);
-    function lock(address owner, uint256 urnIndex, uint256 wad, uint16 ref) external;
-    function open(uint256 urnIndex) external returns (address urn);
-    function ownerUrnsCount(address owner) external view returns (uint256);
-    function selectFarm(address owner, uint256 urnIndex, address farm, uint16 ref) external;
-    function sky() external view returns (address);
-    function urnFarms(address urn) external view returns (address);
+}
+
+interface RewardsBeamLike {
+    function rely(address usr) external;
+    function deny(address usr) external;
+    function wards(address usr) external view returns (uint256);
+    function buds(address usr) external view returns (uint256);
+    function maxVestTot() external view returns (uint256);
+    function vestTau() external view returns (uint256);
+    function tau() external view returns (uint64);
+    function toc() external view returns (uint128);
+}
+
+interface RewardsBeamMomLike {
+    function setOwner(address owner) external;
+    function authority() external view returns (address);
+    function stop() external;
+}
+
+interface VestConfigLike {
+    function file(bytes32 what, uint256 data) external;
+    function res(uint256 id) external view returns (uint256);
+    function usr(uint256 id) external view returns (address);
 }

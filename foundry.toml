@@ -39,6 +39,12 @@ fs_permissions = [
     { access = "read-write", path = "./script/output/" }
 ]
 
+# Build the pinned RewardsBeam test dependency separately; the helper stays on 0.8.16.
+[profile.0_8_24]
+src = 'src-0_8_24'
+script = 'script-0_8_24'
+solc_version = '0.8.24'
+
 [lint]
 lint_on_build = false
 
