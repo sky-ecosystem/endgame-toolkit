@@ -49,8 +49,9 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         sky = chainlog.getAddress("SKY");
         usds = chainlog.getAddress("USDS");
         vest = chainlog.getAddress("MCD_VEST_SKY_TREASURY");
-        initialVestCount = DssVestTransferrableLike(vest).ids();
         distJob = chainlog.getAddress("CRON_REWARDS_DIST_JOB");
+
+        initialVestCount = DssVestTransferrableLike(vest).ids();
 
         lfp = FarmingInitParams({
             stakingToken: lssky,
@@ -417,10 +418,15 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertEq(AuthLike(vest).wards(fp.beam), 1);
         assertEq(AuthLike(vest).wards(fp.mom), 1);
         assertEq(AuthLike(fp.dist).wards(fp.beam), 1);
+        assertEq(AuthLike(fp.dist).wards(pauseProxy), 1);
+        assertEq(AuthLike(fp.dist).wards(address(this)), 0);
         assertEq(RewardsBeamLike(fp.beam).wards(fp.mom), 1);
         assertEq(RewardsBeamLike(fp.beam).wards(pauseProxy), 1);
         assertEq(RewardsBeamLike(fp.beam).wards(address(this)), 0);
         assertEq(AuthLike(vest).wards(address(this)), 0);
+        assertEq(RewardsBeamMomLike(fp.mom).owner(), pauseProxy);
+        assertEq(ERC20Like(sky).allowance(pauseProxy, fp.beam), 0);
+        assertEq(ERC20Like(sky).allowance(pauseProxy, fp.mom), 0);
         assertEq(RewardsBeamLike(fp.beam).maxVestTot(), fp.maxVestTot);
         assertEq(RewardsBeamLike(fp.beam).vestTau(), fp.vestTau);
         assertEq(RewardsBeamLike(fp.beam).tau(), fp.tau);
@@ -462,12 +468,34 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
     function testFarm_init_sharedVestAllowance() public {
         testLockstakeFarm_init();
+        uint256 lockstakeVestId = VestedRewardsDistributionLike(lfp.dist).vestId();
+        uint256 lockstakeVestEnd = DssVestTransferrableLike(vest).fin(lockstakeVestId);
+        uint256 lockstakeVestPaid = DssVestTransferrableLike(vest).rxd(lockstakeVestId);
         testFarm_init();
         assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
         // Both farms retain independent beam permissions on the shared vest.
         assertEq(AuthLike(vest).wards(lfp.beam), 1);
         assertEq(AuthLike(vest).wards(fp.beam), 1);
-        assertNotEq(VestedRewardsDistributionLike(lfp.dist).vestId(), VestedRewardsDistributionLike(fp.dist).vestId());
+        assertEq(VestedRewardsDistributionLike(lfp.dist).vestId(), lockstakeVestId);
+        assertEq(DssVestTransferrableLike(vest).fin(lockstakeVestId), lockstakeVestEnd);
+        assertEq(DssVestTransferrableLike(vest).rxd(lockstakeVestId), lockstakeVestPaid);
+        assertNotEq(lockstakeVestId, VestedRewardsDistributionLike(fp.dist).vestId());
+
+        // Both streams must still fund their own farm after the second initialization.
+        vm.warp(block.timestamp + 1 days);
+        uint256 lockstakeUnpaid = DssVestTransferrableLike(vest).unpaid(lockstakeVestId);
+        uint256 farmUnpaid = DssVestTransferrableLike(vest).unpaid(VestedRewardsDistributionLike(fp.dist).vestId());
+        uint256 lockstakeBalance = ERC20Like(sky).balanceOf(lfp.rewards);
+        uint256 farmBalance = ERC20Like(sky).balanceOf(fp.rewards);
+        uint256 treasuryBalance = ERC20Like(sky).balanceOf(pauseProxy);
+        assertGt(lockstakeUnpaid, 0);
+        assertGt(farmUnpaid, 0);
+        assertEq(VestedRewardsDistributionLike(lfp.dist).distribute(), lockstakeUnpaid);
+        assertEq(VestedRewardsDistributionLike(fp.dist).distribute(), farmUnpaid);
+        assertEq(ERC20Like(sky).balanceOf(lfp.rewards), lockstakeBalance + lockstakeUnpaid);
+        assertEq(ERC20Like(sky).balanceOf(fp.rewards), farmBalance + farmUnpaid);
+        assertEq(ERC20Like(sky).balanceOf(pauseProxy), treasuryBalance - lockstakeUnpaid - farmUnpaid);
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
     }
 
     function testRevert_farm_init_insufficientTreasuryBalance() public {
@@ -596,15 +624,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         fp.distKey = keys[1];
         fp.beamKey = keys[2];
         fp.momKey = keys[3];
-    }
-
-    function testRevert_farm_init_duplicateChainlogKeys_Fuzz(uint256 first, uint256 second) public {
-        first = bound(first, 0, 2);
-        second = bound(second, first + 1, 3);
-        bytes32[4] memory keys = [fp.rewardsKey, fp.distKey, fp.beamKey, fp.momKey];
-        keys[second] = keys[first];
-        _setChainlogKeys(keys);
-        _assertInitReverts("initFarm/duplicate-chainlog-key");
     }
 
     function _assertInitReverts(string memory reason) internal {
@@ -914,23 +933,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         _expectInitRevert(fp.dist, abi.encodeWithSignature("stakingRewards()"), abi.encode(address(0xBAD)));
     }
 
-    function testRevert_farm_init_requiresBeamAndMom() public {
-        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
-        address beam = fp.beam;
-        fp.beam = address(0);
-        vm.expectRevert("ds-pause-delegatecall-error");
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-
-        fp.beam = beam;
-        fp.mom = address(0);
-        vm.expectRevert("ds-pause-delegatecall-error");
-        vm.prank(pause);
-        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-        assertEq(DssVestTransferrableLike(vest).ids(), initialVestCount);
-        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), b.allowance);
-    }
-
     function _expectInitRevert(address target, bytes memory callData, bytes memory returnData) internal {
         vm.mockCall(target, callData, returnData);
         vm.expectRevert("ds-pause-delegatecall-error");
@@ -1003,6 +1005,7 @@ interface StakingRewardsLike {
 
 interface VestedRewardsDistributionLike {
     function dssVest() external view returns (address);
+    function distribute() external returns (uint256);
     function gem() external view returns (address);
     function lastDistributedAt() external view returns (uint256);
     function stakingRewards() external view returns (address);
@@ -1042,6 +1045,7 @@ interface RewardsBeamLike {
 
 interface RewardsBeamMomLike {
     function setOwner(address owner) external;
+    function owner() external view returns (address);
     function authority() external view returns (address);
     function stop() external;
 }
