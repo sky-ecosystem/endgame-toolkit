@@ -33,12 +33,19 @@ jobs:
           forge build --sizes
         id: build_0_6_x
 
+      - name: Build RewardsBeam test dependency
+        env:
+          FOUNDRY_PROFILE: 0_8_24
+        run: forge build
+
       - name: Run Forge build (default)
         run: |
           forge build --sizes
         id: build
 
       - name: Run Forge tests
+        env:
+          FOUNDRY_TEST: script/dependencies/treasury-funded-farms
         run: |
           forge test -vvv
         id: test
