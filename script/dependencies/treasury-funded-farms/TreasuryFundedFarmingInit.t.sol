@@ -204,7 +204,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
     }
 
-    function testFarm_updateVest_withPreviousUnpaidAmount() public {
+    function testFarm_replaceVest_withPreviousUnpaidAmount() public {
         // Check that initialization prepares the cap, allowance and permissions for replacement.
         fp.maxVestTot = 5_000_000 ether;
         fp.vestTau = 45 days;
@@ -613,10 +613,13 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         view
         returns (CheckInitFarmValuesBefore memory b)
     {
+        // Sanity checks
         assertEq(VestedRewardsDistributionLike(p.dist).vestId(), 0, "before: distributor already initialized");
         assertEq(StakingRewardsLike(p.rewards).rewardRate(), 0, "before: rewards already initialized");
         assertEq(StakingRewardsLike(p.rewards).rewardsDistribution(), address(0));
         assertFalse(VestedRewardsDistributionJobLike(p.distJob).has(p.dist));
+
+        // Initial state
         b.allowance = ERC20Like(p.rewardsToken).allowance(pauseProxy, p.vest);
         b.cap = DssVestTransferrableLike(p.vest).cap();
         b.vestCount = DssVestTransferrableLike(p.vest).ids();
