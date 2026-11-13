@@ -139,7 +139,9 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
     function testFarm_init() public {
         CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
-        FarmingInitResult memory result = _initFarm();
+        vm.prank(pause);
+        bytes memory data = ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        FarmingInitResult memory result = abi.decode(data, (FarmingInitResult));
         _checkFarm_init_afterSpell(fp, b, result);
     }
 
@@ -229,7 +231,13 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertEq(DssVestTransferrableLike(vest).rxd(prevId), prevPaid + unpaid, "Old stream should pay pending rewards");
         assertEq(DssVestTransferrableLike(vest).tot(prevId), prevPaid + unpaid);
         assertEq(DssVestTransferrableLike(vest).unpaid(prevId), 0);
-        _checkVest(fp, id, fp.maxVestTot, block.timestamp);
+        assertEq(DssVestTransferrableLike(fp.vest).tot(id), fp.maxVestTot, "Vesting total mismatch");
+        assertEq(DssVestTransferrableLike(fp.vest).bgn(id), block.timestamp, "Vesting start mismatch");
+        assertEq(DssVestTransferrableLike(fp.vest).fin(id), block.timestamp + fp.vestTau, "Vesting duration mismatch");
+        assertEq(VestConfigLike(fp.vest).usr(id), fp.dist, "Vesting recipient mismatch");
+        assertEq(VestConfigLike(fp.vest).res(id), 1, "Vesting stream should be restricted");
+        assertEq(VestConfigLike(fp.vest).clf(id), block.timestamp, "Vesting stream should have no cliff");
+        assertEq(VestConfigLike(fp.vest).mgr(id), address(0), "Vesting stream should have no manager");
         assertEq(DssVestTransferrableLike(vest).rxd(id), 0, "Replacement should not pay immediately");
         assertEq(DssVestTransferrableLike(vest).unpaid(id), 0);
         assertEq(ERC20Like(sky).balanceOf(pauseProxy), treasuryBalance - unpaid);
@@ -567,7 +575,28 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         vm.expectRevert("ds-pause-delegatecall-error");
         vm.prank(pause);
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-        _assertInitUnchanged(b);
+
+        assertEq(DssVestTransferrableLike(vest).ids(), b.vestCount);
+        assertEq(DssVestTransferrableLike(vest).cap(), b.cap);
+        assertEq(VestedRewardsDistributionLike(fp.dist).vestId(), 0);
+        assertEq(VestedRewardsDistributionLike(fp.dist).lastDistributedAt(), 0);
+        assertEq(StakingRewardsLike(fp.rewards).rewardsDistribution(), address(0));
+        assertEq(StakingRewardsLike(fp.rewards).rewardRate(), 0);
+        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), b.allowance);
+        assertEq(ERC20Like(sky).balanceOf(pauseProxy), b.treasuryBalance);
+        assertEq(ERC20Like(sky).balanceOf(fp.rewards), b.farmBalance);
+        assertFalse(VestedRewardsDistributionJobLike(distJob).has(fp.dist));
+        assertEq(AuthLike(vest).wards(fp.beam), 0);
+        assertEq(AuthLike(vest).wards(fp.mom), 0);
+        assertEq(AuthLike(fp.dist).wards(fp.beam), 0);
+        assertEq(RewardsBeamLike(fp.beam).wards(fp.mom), 0);
+        assertEq(RewardsBeamLike(fp.beam).maxVestTot(), 0);
+        assertEq(RewardsBeamLike(fp.beam).vestTau(), 0);
+        assertEq(RewardsBeamLike(fp.beam).tau(), 0);
+        assertEq(RewardsBeamMomLike(fp.mom).authority(), address(0));
+        for (uint256 i; i < fp.buds.length; i++) {
+            assertEq(RewardsBeamLike(fp.beam).buds(fp.buds[i]), 0);
+        }
     }
 
     function testRevert_lockstakeFarm_init_whenStakingTokenIsNotLssky() public {
@@ -607,7 +636,15 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertEq(result.distributedAmount, expectedPayout, "after: returned distribution mismatch");
         assertEq(DssVestTransferrableLike(p.vest).ids(), result.vestId);
         assertEq(VestedRewardsDistributionLike(p.dist).vestId(), result.vestId);
-        _checkVest(p, result.vestId, p.vestTot, p.vestBgn);
+        assertEq(DssVestTransferrableLike(p.vest).tot(result.vestId), p.vestTot, "Vesting total mismatch");
+        assertEq(DssVestTransferrableLike(p.vest).bgn(result.vestId), p.vestBgn, "Vesting start mismatch");
+        assertEq(
+            DssVestTransferrableLike(p.vest).fin(result.vestId), p.vestBgn + p.vestTau, "Vesting duration mismatch"
+        );
+        assertEq(VestConfigLike(p.vest).usr(result.vestId), p.dist, "Vesting recipient mismatch");
+        assertEq(VestConfigLike(p.vest).res(result.vestId), 1, "Vesting stream should be restricted");
+        assertEq(VestConfigLike(p.vest).clf(result.vestId), p.vestBgn, "Vesting stream should have no cliff");
+        assertEq(VestConfigLike(p.vest).mgr(result.vestId), address(0), "Vesting stream should have no manager");
         assertEq(DssVestTransferrableLike(p.vest).rxd(result.vestId), expectedPayout);
         assertEq(DssVestTransferrableLike(p.vest).unpaid(result.vestId), 0);
         assertEq(VestedRewardsDistributionLike(p.dist).lastDistributedAt(), expectedPayout > 0 ? block.timestamp : 0);
@@ -653,51 +690,11 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         }
     }
 
-    function _checkVest(FarmingInitParams memory p, uint256 id, uint256 total, uint256 begin) internal view {
-        assertEq(DssVestTransferrableLike(p.vest).tot(id), total, "Vesting total mismatch");
-        assertEq(DssVestTransferrableLike(p.vest).bgn(id), begin, "Vesting start mismatch");
-        assertEq(DssVestTransferrableLike(p.vest).fin(id), begin + p.vestTau, "Vesting duration mismatch");
-        assertEq(VestConfigLike(p.vest).usr(id), p.dist, "Vesting recipient mismatch");
-        assertEq(VestConfigLike(p.vest).res(id), 1, "Vesting stream should be restricted");
-        assertEq(VestConfigLike(p.vest).clf(id), begin, "Vesting stream should have no cliff");
-        assertEq(VestConfigLike(p.vest).mgr(id), address(0), "Vesting stream should have no manager");
-    }
-
-    function _initFarm() internal returns (FarmingInitResult memory result) {
-        vm.prank(pause);
-        bytes memory data = ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
-        result = abi.decode(data, (FarmingInitResult));
-    }
-
     function _setChainlogKeys(bytes32[4] memory keys) internal {
         fp.rewardsKey = keys[0];
         fp.distKey = keys[1];
         fp.beamKey = keys[2];
         fp.momKey = keys[3];
-    }
-
-    function _assertInitUnchanged(CheckInitFarmValuesBefore memory b) internal view {
-        assertEq(DssVestTransferrableLike(vest).ids(), b.vestCount);
-        assertEq(DssVestTransferrableLike(vest).cap(), b.cap);
-        assertEq(VestedRewardsDistributionLike(fp.dist).vestId(), 0);
-        assertEq(VestedRewardsDistributionLike(fp.dist).lastDistributedAt(), 0);
-        assertEq(StakingRewardsLike(fp.rewards).rewardsDistribution(), address(0));
-        assertEq(StakingRewardsLike(fp.rewards).rewardRate(), 0);
-        assertEq(ERC20Like(sky).allowance(pauseProxy, vest), b.allowance);
-        assertEq(ERC20Like(sky).balanceOf(pauseProxy), b.treasuryBalance);
-        assertEq(ERC20Like(sky).balanceOf(fp.rewards), b.farmBalance);
-        assertFalse(VestedRewardsDistributionJobLike(distJob).has(fp.dist));
-        assertEq(AuthLike(vest).wards(fp.beam), 0);
-        assertEq(AuthLike(vest).wards(fp.mom), 0);
-        assertEq(AuthLike(fp.dist).wards(fp.beam), 0);
-        assertEq(RewardsBeamLike(fp.beam).wards(fp.mom), 0);
-        assertEq(RewardsBeamLike(fp.beam).maxVestTot(), 0);
-        assertEq(RewardsBeamLike(fp.beam).vestTau(), 0);
-        assertEq(RewardsBeamLike(fp.beam).tau(), 0);
-        assertEq(RewardsBeamMomLike(fp.mom).authority(), address(0));
-        for (uint256 i; i < fp.buds.length; i++) {
-            assertEq(RewardsBeamLike(fp.beam).buds(fp.buds[i]), 0);
-        }
     }
 }
 
