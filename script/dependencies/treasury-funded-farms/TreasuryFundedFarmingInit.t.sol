@@ -601,8 +601,10 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
     function testRevert_lockstakeFarm_init_whenStakingTokenIsNotLssky() public {
         lfp.stakingToken = usds;
-        vm.expectRevert("ds-pause-delegatecall-error");
+
+        // Simulate spell casting
         vm.prank(pause);
+        vm.expectRevert("ds-pause-delegatecall-error");
         ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initLockstakeFarm, (lfp, lockstakeEngine)));
     }
 
