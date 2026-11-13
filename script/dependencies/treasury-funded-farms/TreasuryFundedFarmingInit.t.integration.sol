@@ -255,6 +255,7 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         deal(address(fp.stakingToken), usr, stakeAmt);
         ERC20Like(fp.stakingToken).approve(fp.rewards, stakeAmt);
         StakingRewardsLike(fp.rewards).stake(stakeAmt);
+        assertEq(StakingRewardsLike(fp.rewards).balanceOf(usr), stakeAmt, "Staked balance mismatch");
 
         // Accumulate some rewards
         assertEq(StakingRewardsLike(fp.rewards).earned(usr), 0, "No rewards should be earned before time advances");
