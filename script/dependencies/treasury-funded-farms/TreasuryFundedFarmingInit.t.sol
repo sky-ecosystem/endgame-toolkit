@@ -116,6 +116,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
         _deployBeam(lfp);
         _deployBeam(fp);
+
         spell = new MockSpell();
     }
 
@@ -139,8 +140,11 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 
     function testFarm_init() public {
         CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
+
+        // Simulate spell casting
         vm.prank(pause);
         bytes memory data = ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
         FarmingInitResult memory result = abi.decode(data, (FarmingInitResult));
         _checkFarm_init_afterSpell(fp, b, result);
     }
@@ -177,7 +181,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         testFarm_init();
     }
 
-    function testFarm_init_futureStreamDoesNotDistribute() public {
+    function testFarm_init_whenVestingHasNotStarted() public {
         fp.vestBgn = block.timestamp + 1 days;
         testFarm_init();
     }
@@ -189,7 +193,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertEq(RewardsBeamLike(fp.beam).buds(address(0xB0B)), 0);
     }
 
-    function testFarm_init_sharedVestAllowance() public {
+    function testFarm_init_preservesExistingFarmOnSharedVest() public {
         testLockstakeFarm_init();
         uint256 lockstakeVestId = VestedRewardsDistributionLike(lfp.dist).vestId();
         uint256 lockstakeVestEnd = DssVestTransferrableLike(vest).fin(lockstakeVestId);
@@ -205,14 +209,17 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     }
 
     function testFarm_replaceVest_withPreviousUnpaidAmount() public {
-        // Check that initialization prepares the cap, allowance and permissions for replacement.
+        // Prepare the farm for replacement.
         fp.maxVestTot = 5_000_000 ether;
         fp.vestTau = 45 days;
         vm.prank(pauseProxy);
         VestConfigLike(vest).file("cap", 0);
         testFarm_init();
+
+        // Accumulate unpaid rewards.
         vm.warp(block.timestamp + 3 days);
 
+        // Record state before replacement.
         uint256 prevId = VestedRewardsDistributionLike(fp.dist).vestId();
         uint256 prevPaid = DssVestTransferrableLike(vest).rxd(prevId);
         uint256 unpaid = DssVestTransferrableLike(vest).unpaid(prevId);
@@ -221,16 +228,22 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         uint256 cap = DssVestTransferrableLike(vest).cap();
         assertGt(unpaid, 0, "Old stream should have pending rewards");
 
+        // Replace the stream at the configured maximum.
         vm.prank(fp.buds[0]);
         RewardsBeamLike(fp.beam).set(fp.maxVestTot);
 
+        // Check the replacement stream ID.
         uint256 id = VestedRewardsDistributionLike(fp.dist).vestId();
         assertEq(id, prevId + 1, "Distributor should point to the replacement");
         assertEq(DssVestTransferrableLike(vest).ids(), id, "Should create exactly one new stream");
+
+        // Check the old stream was paid and terminated.
         assertEq(DssVestTransferrableLike(vest).fin(prevId), block.timestamp, "Old stream should end now");
         assertEq(DssVestTransferrableLike(vest).rxd(prevId), prevPaid + unpaid, "Old stream should pay pending rewards");
         assertEq(DssVestTransferrableLike(vest).tot(prevId), prevPaid + unpaid);
         assertEq(DssVestTransferrableLike(vest).unpaid(prevId), 0);
+
+        // Check the new stream parameters.
         assertEq(DssVestTransferrableLike(fp.vest).tot(id), fp.maxVestTot, "Vesting total mismatch");
         assertEq(DssVestTransferrableLike(fp.vest).bgn(id), block.timestamp, "Vesting start mismatch");
         assertEq(DssVestTransferrableLike(fp.vest).fin(id), block.timestamp + fp.vestTau, "Vesting duration mismatch");
@@ -238,12 +251,18 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertEq(VestConfigLike(fp.vest).res(id), 1, "Vesting stream should be restricted");
         assertEq(VestConfigLike(fp.vest).clf(id), block.timestamp, "Vesting stream should have no cliff");
         assertEq(VestConfigLike(fp.vest).mgr(id), address(0), "Vesting stream should have no manager");
+
+        // Only the old stream should have paid.
         assertEq(DssVestTransferrableLike(vest).rxd(id), 0, "Replacement should not pay immediately");
         assertEq(DssVestTransferrableLike(vest).unpaid(id), 0);
         assertEq(ERC20Like(sky).balanceOf(pauseProxy), treasuryBalance - unpaid);
         assertEq(ERC20Like(sky).balanceOf(fp.rewards), farmBalance + unpaid);
         assertEq(ERC20Like(sky).balanceOf(fp.dist), 0);
+
+        // Replacement preserves unlimited allowance.
         assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
+
+        // Replacement preserves the cap.
         assertEq(DssVestTransferrableLike(vest).cap(), cap, "Replacement should preserve the prepared cap");
     }
 
