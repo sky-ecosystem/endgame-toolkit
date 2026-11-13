@@ -159,7 +159,10 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         );
     }
 
-    function testFarm_init_cap_Fuzz(bool initialTotalAboveMaximum, bool raiseCap) public {
+    function testFarm_init_whenVestingRateIsAboveOrBelowCurrentVestCap_Fuzz(
+        bool initialTotalAboveMaximum,
+        bool raiseCap
+    ) public {
         fp.maxVestTot = initialTotalAboveMaximum ? fp.vestTot / 2 : fp.vestTot * 2;
         vm.prank(pauseProxy);
         VestConfigLike(vest).file("cap", raiseCap ? 0 : 100 ether);
@@ -199,7 +202,7 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         assertEq(ERC20Like(sky).allowance(pauseProxy, vest), type(uint256).max);
     }
 
-    function testFarm_replaceVest() public {
+    function testFarm_updateVest_withPreviousUnpaidAmount() public {
         // Check that initialization prepares the cap, allowance and permissions for replacement.
         fp.maxVestTot = 5_000_000 ether;
         fp.vestTau = 45 days;
@@ -239,115 +242,276 @@ contract TreasuryFundedFarmingInitTest is DssTest {
     function testRevert_farm_init_whenInvalidParams() public {
         uint256 total = fp.vestTot;
         fp.vestTot = 0;
-        _assertInitReverts("initFarm/vest-tot-zero");
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
         fp.vestTot = uint256(type(uint128).max) + 1;
-        _assertInitReverts("initFarm/vest-tot-too-large");
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
         fp.vestTot = total;
 
         uint256 maximum = fp.maxVestTot;
         fp.maxVestTot = uint256(type(uint128).max) + 1;
-        _assertInitReverts("initFarm/max-vest-tot-too-large");
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
         fp.maxVestTot = maximum;
 
         uint256 duration = fp.vestTau;
         fp.vestTau = 0;
-        _assertInitReverts("initFarm/vest-tau-zero");
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
         fp.vestTau = 20 * 365 days + 1;
-        _assertInitReverts("initFarm/vest-tau-too-long");
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
         fp.vestTau = duration;
 
         uint256 cooldown = fp.tau;
         fp.tau = uint256(type(uint64).max) + 1;
-        _assertInitReverts("initFarm/invalid-tau");
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
         fp.tau = cooldown;
 
         for (uint256 i; i < fp.buds.length; i++) {
             address bud = fp.buds[i];
             fp.buds[i] = address(0);
-            _assertInitReverts("initFarm/zero-facilitator");
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
             fp.buds[i] = bud;
         }
     }
 
     function testRevert_farm_init_whenMismatchingParams() public {
-        _expectInitRevert(
-            fp.vest, abi.encodeWithSignature("czar()"), abi.encode(address(0xBAD)), "initFarm/vest-czar-mismatch"
-        );
-        _expectInitRevert(
-            fp.vest, abi.encodeWithSignature("gem()"), abi.encode(address(0xBAD)), "initFarm/vest-gem-mismatch"
-        );
-        _expectInitRevert(
-            fp.rewards,
-            abi.encodeWithSignature("stakingToken()"),
-            abi.encode(address(0xBAD)),
-            "initFarm/rewards-staking-token-mismatch"
-        );
-        _expectInitRevert(
-            fp.rewards,
-            abi.encodeWithSignature("rewardsToken()"),
-            abi.encode(address(0xBAD)),
-            "initFarm/rewards-rewards-token-mismatch"
-        );
-        _expectInitRevert(
-            fp.rewards, abi.encodeWithSignature("rewardRate()"), abi.encode(uint256(1)), "initFarm/reward-rate-not-zero"
-        );
-        _expectInitRevert(
-            fp.rewards,
-            abi.encodeWithSignature("rewardsDistribution()"),
-            abi.encode(address(0xBAD)),
-            "initFarm/rewards-distribution-already-set"
-        );
-        _expectInitRevert(
-            fp.rewards, abi.encodeWithSignature("owner()"), abi.encode(address(0xBAD)), "initFarm/invalid-owner"
-        );
-        _expectInitRevert(
-            fp.rewards,
-            abi.encodeWithSignature("nominatedOwner()"),
-            abi.encode(address(0xBAD)),
-            "initFarm/pending-owner"
-        );
-        _expectInitRevert(
-            fp.dist, abi.encodeWithSignature("gem()"), abi.encode(address(0xBAD)), "initFarm/dist-gem-mismatch"
-        );
-        _expectInitRevert(
-            fp.dist, abi.encodeWithSignature("dssVest()"), abi.encode(address(0xBAD)), "initFarm/dist-dss-vest-mismatch"
-        );
-        _expectInitRevert(
-            fp.dist, abi.encodeWithSignature("vestId()"), abi.encode(uint256(1)), "initFarm/dist-vest-id-already-set"
-        );
-        _expectInitRevert(
-            fp.dist,
-            abi.encodeWithSignature("stakingRewards()"),
-            abi.encode(address(0xBAD)),
-            "initFarm/dist-staking-rewards-mismatch"
-        );
-        _expectInitRevert(
-            fp.beam, abi.encodeWithSignature("toc()"), abi.encode(uint256(1)), "initFarm/beam-toc-not-zero"
-        );
-        _expectInitRevert(
-            fp.beam, abi.encodeWithSignature("dist()"), abi.encode(address(0xBAD)), "initFarm/beam-dist-mismatch"
-        );
-        _expectInitRevert(
-            fp.beam, abi.encodeWithSignature("vest()"), abi.encode(address(0xBAD)), "initFarm/beam-vest-mismatch"
-        );
-        _expectInitRevert(
-            fp.mom, abi.encodeWithSignature("beam()"), abi.encode(address(0xBAD)), "initFarm/mom-beam-mismatch"
-        );
-        _expectInitRevert(
-            fp.mom, abi.encodeWithSignature("dist()"), abi.encode(address(0xBAD)), "initFarm/mom-dist-mismatch"
-        );
-        _expectInitRevert(
-            fp.mom, abi.encodeWithSignature("vest()"), abi.encode(address(0xBAD)), "initFarm/mom-vest-mismatch"
-        );
-        _expectInitRevert(
-            fp.mom, abi.encodeWithSignature("owner()"), abi.encode(address(0xBAD)), "initFarm/mom-owner-mismatch"
-        );
-        _expectInitRevert(
-            address(chainlog),
-            abi.encodeWithSignature("getAddress(bytes32)", bytes32("MCD_ADM")),
-            abi.encode(address(0xBAD)),
-            "initFarm/invalid-chief"
-        );
+        // vest.czar != pauseProxy
+        {
+            vm.mockCall(address(fp.vest), abi.encodeWithSignature("czar()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // vest.gem != fp.rewardsToken
+        {
+            vm.mockCall(address(fp.vest), abi.encodeWithSignature("gem()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // rewards.stakingToken() != fp.stakingToken
+        {
+            vm.mockCall(address(fp.rewards), abi.encodeWithSignature("stakingToken()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // rewards.rewardsToken() != fp.rewardsToken
+        {
+            vm.mockCall(address(fp.rewards), abi.encodeWithSignature("rewardsToken()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // rewards.rewardRate != 0
+        {
+            vm.mockCall(address(fp.rewards), abi.encodeWithSignature("rewardRate()"), abi.encode(uint256(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // rewards.rewardsDistribution != address(0)
+        {
+            vm.mockCall(
+                address(fp.rewards), abi.encodeWithSignature("rewardsDistribution()"), abi.encode(address(0x1337))
+            );
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // rewards.owner() != MCD_PAUSE_PROXY
+        {
+            vm.mockCall(address(fp.rewards), abi.encodeWithSignature("owner()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // rewards.nominatedOwner() != address(0)
+        {
+            vm.mockCall(address(fp.rewards), abi.encodeWithSignature("nominatedOwner()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // dist.gem != fp.rewardsToken
+        {
+            vm.mockCall(address(fp.dist), abi.encodeWithSignature("gem()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // dist.dssVest != fp.vest
+        {
+            vm.mockCall(address(fp.dist), abi.encodeWithSignature("dssVest()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // dist.vestId != 0
+        {
+            vm.mockCall(address(fp.dist), abi.encodeWithSignature("vestId()"), abi.encode(uint256(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // dist.stakingRewards() != fp.rewards
+        {
+            vm.mockCall(address(fp.dist), abi.encodeWithSignature("stakingRewards()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // beam.toc != 0
+        {
+            vm.mockCall(address(fp.beam), abi.encodeWithSignature("toc()"), abi.encode(uint256(1)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // beam.dist != fp.dist
+        {
+            vm.mockCall(address(fp.beam), abi.encodeWithSignature("dist()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // beam.vest != fp.vest
+        {
+            vm.mockCall(address(fp.beam), abi.encodeWithSignature("vest()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // mom.beam != fp.beam
+        {
+            vm.mockCall(address(fp.mom), abi.encodeWithSignature("beam()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // mom.dist != fp.dist
+        {
+            vm.mockCall(address(fp.mom), abi.encodeWithSignature("dist()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // mom.vest != fp.vest
+        {
+            vm.mockCall(address(fp.mom), abi.encodeWithSignature("vest()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // mom.owner != MCD_PAUSE_PROXY
+        {
+            vm.mockCall(address(fp.mom), abi.encodeWithSignature("owner()"), abi.encode(address(0x1337)));
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
+
+        // Chief must be a contract
+        {
+            vm.mockCall(
+                address(chainlog),
+                abi.encodeWithSignature("getAddress(bytes32)", bytes32("MCD_ADM")),
+                abi.encode(address(0x1337))
+            );
+
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+
+            vm.clearMockedCalls();
+        }
     }
 
     function testRevert_farm_init_whenInvalidChainlogKeys() public {
@@ -356,7 +520,9 @@ contract TreasuryFundedFarmingInitTest is DssTest {
             bytes32 key = keys[i];
             keys[i] = bytes32(0);
             _setChainlogKeys(keys);
-            _assertInitReverts("initFarm/zero-chainlog-key");
+            vm.expectRevert("ds-pause-delegatecall-error");
+            vm.prank(pause);
+            ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
             keys[i] = key;
         }
         for (uint256 first; first < 3; first++) {
@@ -364,7 +530,9 @@ contract TreasuryFundedFarmingInitTest is DssTest {
                 bytes32 key = keys[second];
                 keys[second] = keys[first];
                 _setChainlogKeys(keys);
-                _assertInitReverts("initFarm/duplicate-chainlog-key");
+                vm.expectRevert("ds-pause-delegatecall-error");
+                vm.prank(pause);
+                ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
                 keys[second] = key;
             }
         }
@@ -375,23 +543,31 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         vm.mockCall(
             sky, abi.encodeWithSignature("approve(address,uint256)", vest, type(uint256).max), abi.encode(false)
         );
-        _assertInitReverts("initFarm/rewards-approve-failed");
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
         vm.clearMockedCalls();
 
         vm.prank(pauseProxy);
         ERC20Like(sky).approve(vest, 0);
         vm.mockCall(sky, abi.encodeWithSignature("approve(address,uint256)", vest, type(uint256).max), abi.encode(true));
-        _assertInitReverts("initFarm/rewards-allowance-mismatch");
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
         vm.clearMockedCalls();
     }
 
     function testRevert_farm_init_whenJobFails() public {
+        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
         vm.mockCallRevert(
             distJob,
             abi.encodeWithSignature("set(address,uint256)", fp.dist, fp.distJobInterval),
             abi.encodeWithSignature("Error(string)", "Job/set-failed")
         );
-        _assertInitReverts("Job/set-failed");
+        vm.expectRevert("ds-pause-delegatecall-error");
+        vm.prank(pause);
+        ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.initFarm, (fp)));
+        _assertInitUnchanged(b);
     }
 
     function testRevert_lockstakeFarm_init_whenStakingTokenIsNotLssky() public {
@@ -500,30 +676,6 @@ contract TreasuryFundedFarmingInitTest is DssTest {
         fp.momKey = keys[3];
     }
 
-    function _assertInitReverts(string memory reason) internal {
-        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
-        _assertInitFailure(reason);
-        _assertInitUnchanged(b);
-    }
-
-    function _expectInitRevert(address target, bytes memory callData, bytes memory returnData, string memory reason)
-        internal
-    {
-        CheckInitFarmValuesBefore memory b = _checkFarm_init_beforeSpell(fp);
-        vm.mockCall(target, callData, returnData);
-        _assertInitFailure(reason);
-        vm.clearMockedCalls();
-        _assertInitUnchanged(b);
-    }
-
-    function _assertInitFailure(string memory reason) internal {
-        vm.prank(pause);
-        bytes memory data = ProxyLike(pauseProxy).exec(address(spell), abi.encodeCall(spell.tryInitFarm, (fp)));
-        (bool success, bytes memory result) = abi.decode(data, (bool, bytes));
-        assertFalse(success, "Initialization should fail");
-        assertEq(result, abi.encodeWithSignature("Error(string)", reason), "Unexpected initialization failure");
-    }
-
     function _assertInitUnchanged(CheckInitFarmValuesBefore memory b) internal view {
         assertEq(DssVestTransferrableLike(vest).ids(), b.vestCount);
         assertEq(DssVestTransferrableLike(vest).cap(), b.cap);
@@ -550,15 +702,8 @@ contract TreasuryFundedFarmingInitTest is DssTest {
 }
 
 contract MockSpell {
-    address immutable self = address(this);
-
     function initFarm(FarmingInitParams memory p) public returns (FarmingInitResult memory) {
         return TreasuryFundedFarmingInit.initFarm(p);
-    }
-
-    // Preserve the real Pause Proxy context while returning the initializer's exact failure to the test.
-    function tryInitFarm(FarmingInitParams memory p) public returns (bool success, bytes memory data) {
-        return self.delegatecall(abi.encodeCall(this.initFarm, (p)));
     }
 
     function initLockstakeFarm(FarmingInitParams memory p, address lockstakeEngine)
