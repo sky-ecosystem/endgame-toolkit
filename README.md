@@ -94,7 +94,7 @@ After cloning the repo, run:
 # 1. Install solhint, prettier, husky and other tools
 yarn install
 # 2. Install Foundry dependencies
-forge update
+git submodule update --init --recursive
 ```
 
 ### Build
@@ -102,9 +102,11 @@ forge update
 **⚠️ ATTENTION:** The order of execution is important here.
 
 ```bash
-# 1. Build the Solidity 0.6.x contract
+# 1. Build the Solidity 0.6.x contracts
 FOUNDRY_PROFILE=0_6_x forge build
-# 2. Build the default Solidity 0.8.x contracts
+# 2. Build RewardsBeam and RewardsBeamMom with Solidity 0.8.24
+FOUNDRY_PROFILE=0_8_24 forge build
+# 3. Build the default Solidity 0.8.16 contracts
 forge build
 ```
 
