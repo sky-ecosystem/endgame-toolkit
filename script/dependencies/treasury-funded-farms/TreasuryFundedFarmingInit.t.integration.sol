@@ -308,10 +308,14 @@ contract TreasuryFundedFarmingInitIntegrationTest is DssTest {
         vm.warp(block.timestamp + 1 days);
         uint256 earnedAfter = StakingRewardsLike(fp.rewards).earned(usr);
         assertGt(earnedAfter, earnedBefore, "Rewards should continue accumulating after stream replacement");
+
+        // Verify we can still claim rewards
         uint256 preBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
         StakingRewardsLike(fp.rewards).getReward();
         uint256 postBalance = ERC20Like(fp.rewardsToken).balanceOf(usr);
         assertEq(postBalance, preBalance + earnedAfter, "Rewards claim mismatch");
+       
+        // Verify we can still withdraw stake       
         StakingRewardsLike(fp.rewards).withdraw(stakeAmt);
         assertEq(StakingRewardsLike(fp.rewards).balanceOf(usr), 0, "All stake should be withdrawn");
         assertEq(ERC20Like(fp.stakingToken).balanceOf(usr), stakeAmt, "Withdrawn stake mismatch");
